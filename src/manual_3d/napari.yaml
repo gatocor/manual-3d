@@ -1,0 +1,57 @@
+name: manual-3d
+display_name: manual-3d
+# use 'hidden' to remove plugin from napari hub search results
+visibility: public
+# see https://napari.org/stable/plugins/manifest.html for valid categories
+categories: ["Annotation", "Segmentation", "Acquisition"]
+contributions:
+  commands:
+    - id: manual-3d.get_reader
+      python_name: manual_3d._reader:napari_get_reader
+      title: Open data with manual-3d
+    - id: manual-3d.write_multiple
+      python_name: manual_3d._writer:write_multiple
+      title: Save multi-layer data with manual-3d
+    - id: manual-3d.write_single_image
+      python_name: manual_3d._writer:write_single_image
+      title: Save image data with manual-3d
+    - id: manual-3d.make_sample_data
+      python_name: manual_3d._sample_data:make_sample_data
+      title: Load sample data from manual-3d
+    - id: manual-3d.make_container_widget
+      python_name: manual_3d:ImageThreshold
+      title: Make threshold Container widget
+    - id: manual-3d.make_magic_widget
+      python_name: manual_3d:threshold_magic_widget
+      title: Make threshold magic widget
+    - id: manual-3d.make_function_widget
+      python_name: manual_3d:threshold_autogenerate_widget
+      title: Make threshold function widget
+    - id: manual-3d.make_qwidget
+      python_name: manual_3d:ExampleQWidget
+      title: Make example QWidget
+  readers:
+    - command: manual-3d.get_reader
+      accepts_directories: false
+      filename_patterns: ['*.npy']
+  writers:
+    - command: manual-3d.write_multiple
+      layer_types: ['image*','labels*']
+      filename_extensions: []
+    - command: manual-3d.write_single_image
+      layer_types: ['image']
+      filename_extensions: ['.npy']
+  sample_data:
+    - command: manual-3d.make_sample_data
+      display_name: manual-3d
+      key: unique_id.1
+  widgets:
+    - command: manual-3d.make_container_widget
+      display_name: Container Threshold
+    - command: manual-3d.make_magic_widget
+      display_name: Magic Threshold
+    - command: manual-3d.make_function_widget
+      autogenerate: true
+      display_name: Autogenerate Threshold
+    - command: manual-3d.make_qwidget
+      display_name: Example QWidget
