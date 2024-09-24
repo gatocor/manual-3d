@@ -18,18 +18,25 @@ contributions:
     - id: manual-3d.make_sample_data
       python_name: manual_3d._sample_data:make_sample_data
       title: Load sample data from manual-3d
-    - id: manual-3d.make_container_widget
-      python_name: manual_3d:ImageThreshold
-      title: Make threshold Container widget
-    - id: manual-3d.make_magic_widget
-      python_name: manual_3d:threshold_magic_widget
-      title: Make threshold magic widget
-    - id: manual-3d.make_function_widget
-      python_name: manual_3d:threshold_autogenerate_widget
-      title: Make threshold function widget
-    - id: manual-3d.make_qwidget
-      python_name: manual_3d:ExampleQWidget
-      title: Make example QWidget
+    - id: manual-3d.widget_find_peaks
+      python_name: manual_3d:FindPeaks
+      title: FindPeaks
+
+    # - id: manual-3d.make_container_widget
+    #   python_name: manual_3d:ImageThreshold
+    #   title: Make threshold Container widget
+    # - id: manual-3d.make_magic_widget
+    #   python_name: manual_3d:threshold_magic_widget
+    #   title: Make threshold magic widget
+    # - id: manual-3d.make_function_widget
+    #   python_name: manual_3d:threshold_autogenerate_widget
+    #   title: Make threshold function widget
+    # - id: manual-3d.activate_widget
+    #   python_name: manual_3d:activate_widget
+    #   title: Make threshold function widget
+    # - id: manual-3d.make_qwidget
+    #   python_name: manual_3d:ExampleQWidget
+    #   title: Make example QWidget
   readers:
     - command: manual-3d.get_reader
       accepts_directories: false
@@ -46,12 +53,17 @@ contributions:
       display_name: manual-3d
       key: unique_id.1
   widgets:
-    - command: manual-3d.make_container_widget
-      display_name: Container Threshold
-    - command: manual-3d.make_magic_widget
-      display_name: Magic Threshold
-    - command: manual-3d.make_function_widget
-      autogenerate: true
-      display_name: Autogenerate Threshold
-    - command: manual-3d.make_qwidget
-      display_name: Example QWidget
+    - command: manual-3d.widget_find_peaks
+      display_name: FindPeaks
+    # - command: manual-3d.make_container_widget
+    #   display_name: Container Threshold
+    # - command: manual-3d.make_magic_widget
+    #   display_name: Magic Threshold
+    # - command: manual-3d.make_function_widget
+    #   autogenerate: true
+    #   display_name: Autogenerate Threshold
+    # - command: manual-3d.activate_widget
+    #   autogenerate: true
+    #   display_name: Say hi
+    # - command: manual-3d.make_qwidget
+    #   display_name: Example QWidget

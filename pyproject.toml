@@ -45,10 +45,10 @@ testing = [
 manual-3d = "manual_3d:napari.yaml"
 
 [project.urls]
-"Bug Tracker" = "https://github.com/gatoco/manual-3d/issues"
-"Documentation" = "https://github.com/gatoco/manual-3d#README.md"
-"Source Code" = "https://github.com/gatoco/manual-3d"
-"User Support" = "https://github.com/gatoco/manual-3d/issues"
+"Bug Tracker" = "https://github.com/gatocor/manual-3d/issues"
+"Documentation" = "https://github.com/gatocor/manual-3d#README.md"
+"Source Code" = "https://github.com/gatocor/manual-3d"
+"User Support" = "https://github.com/gatocor/manual-3d/issues"
 
 [build-system]
 requires = ["setuptools>=42.0.0", "wheel", "setuptools_scm"]

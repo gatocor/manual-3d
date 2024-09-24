@@ -1,10 +1,10 @@
 # manual-3d
 
-[![License MIT](https://img.shields.io/pypi/l/manual-3d.svg?color=green)](https://github.com/gatoco/manual-3d/raw/main/LICENSE)
+[![License MIT](https://img.shields.io/pypi/l/manual-3d.svg?color=green)](https://github.com/gatocor/manual-3d/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/manual-3d.svg?color=green)](https://pypi.org/project/manual-3d)
 [![Python Version](https://img.shields.io/pypi/pyversions/manual-3d.svg?color=green)](https://python.org)
-[![tests](https://github.com/gatoco/manual-3d/workflows/tests/badge.svg)](https://github.com/gatoco/manual-3d/actions)
-[![codecov](https://codecov.io/gh/gatoco/manual-3d/branch/main/graph/badge.svg)](https://codecov.io/gh/gatoco/manual-3d)
+[![tests](https://github.com/gatocor/manual-3d/workflows/tests/badge.svg)](https://github.com/gatocor/manual-3d/actions)
+[![codecov](https://codecov.io/gh/gatocor/manual-3d/branch/main/graph/badge.svg)](https://codecov.io/gh/gatocor/manual-3d)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/manual-3d)](https://napari-hub.org/plugins/manual-3d)
 
 Manual 3D
@@ -31,7 +31,7 @@ You can install `manual-3d` via [pip]:
 
 To install latest development version :
 
-    pip install git+https://github.com/gatoco/manual-3d.git
+    pip install git+https://github.com/gatocor/manual-3d.git
 
 
 ## Contributing
@@ -59,7 +59,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [napari-plugin-template]: https://github.com/napari/napari-plugin-template
 
-[file an issue]: https://github.com/gatoco/manual-3d/issues
+[file an issue]: https://github.com/gatocor/manual-3d/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/

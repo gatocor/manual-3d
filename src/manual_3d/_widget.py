@@ -42,35 +42,51 @@ if TYPE_CHECKING:
 # Uses the `autogenerate: true` flag in the plugin manifest
 # to indicate it should be wrapped as a magicgui to autogenerate
 # a widget.
-def threshold_autogenerate_widget(
-    img: "napari.types.ImageData",
-    threshold: "float",
-) -> "napari.types.LabelsData":
-    return img_as_float(img) > threshold
+# def threshold_autogenerate_widget(
+#     img: "napari.types.ImageData",
+#     threshold: "float",
+# ) -> "napari.types.LabelsData":
+#     print("hi")
+#     return img_as_float(img) > threshold
 
 
-# the magic_factory decorator lets us customize aspects of our widget
-# we specify a widget type for the threshold parameter
-# and use auto_call=True so the function is called whenever
-# the value of a parameter changes
-@magic_factory(
-    threshold={"widget_type": "FloatSlider", "max": 1}, auto_call=True
-)
-def threshold_magic_widget(
-    img_layer: "napari.layers.Image", threshold: "float"
-) -> "napari.types.LabelsData":
-    return img_as_float(img_layer.data) > threshold
+# def activate_widget(
+#     img: "napari.types.PointsData",
+#     threshold: "float",
+# ) -> None:
+#     print("Hi")
+#     return
+
+
+# # the magic_factory decorator lets us customize aspects of our widget
+# # we specify a widget type for the threshold parameter
+# # and use auto_call=True so the function is called whenever
+# # the value of a parameter changes
+# @magic_factory(
+#     threshold={"widget_type": "FloatSlider", "max": 1}, auto_call=True
+# )
+# def threshold_magic_widget(
+#     img_layer: "napari.layers.Image", threshold: "float"
+# ) -> "napari.types.LabelsData":
+#     return img_as_float(img_layer.data) > threshold
 
 
 # if we want even more control over our widget, we can use
 # magicgui `Container`
-class ImageThreshold(Container):
+    
+from napari.utils.events import Event
+
+class FindPeaks(Container):
     def __init__(self, viewer: "napari.viewer.Viewer"):
+        
         super().__init__()
         self._viewer = viewer
         # use create_widget to generate widgets from type annotations
-        self._image_layer_combo = create_widget(
+        self._image_layer = create_widget(
             label="Image", annotation="napari.layers.Image"
+        )
+        self._points_layer = create_widget(
+            label="Points", annotation="napari.layers.Points"
         )
         self._threshold_slider = create_widget(
             label="Threshold", annotation=float, widget_type="FloatSlider"
@@ -83,15 +99,25 @@ class ImageThreshold(Container):
         # connect your own callbacks
         self._threshold_slider.changed.connect(self._threshold_im)
         self._invert_checkbox.changed.connect(self._threshold_im)
+        self._compute = create_widget(
+            label="Compute", annotation=float, widget_type="PushButton"
+        )
 
         # append into/extend the container with your widgets
         self.extend(
             [
-                self._image_layer_combo,
+                self._image_layer,
+                self._points_layer,
                 self._threshold_slider,
                 self._invert_checkbox,
+                self._compute,
             ]
         )
+
+        def my_callback(event: Event):
+            print("The number of dims shown is now:", event)        
+
+        self._viewer.layers.events.inserting.connect(my_callback)
 
     def _threshold_im(self):
         image_layer = self._image_layer_combo.value
@@ -111,18 +137,18 @@ class ImageThreshold(Container):
             self._viewer.add_labels(thresholded, name=name)
 
 
-class ExampleQWidget(QWidget):
-    # your QWidget.__init__ can optionally request the napari viewer instance
-    # use a type annotation of 'napari.viewer.Viewer' for any parameter
-    def __init__(self, viewer: "napari.viewer.Viewer"):
-        super().__init__()
-        self.viewer = viewer
+# class ExampleQWidget(QWidget):
+#     # your QWidget.__init__ can optionally request the napari viewer instance
+#     # use a type annotation of 'napari.viewer.Viewer' for any parameter
+#     def __init__(self, viewer: "napari.viewer.Viewer"):
+#         super().__init__()
+#         self.viewer = viewer
 
-        btn = QPushButton("Click me!")
-        btn.clicked.connect(self._on_click)
+#         btn = QPushButton("Click me!")
+#         btn.clicked.connect(self._on_click)
 
-        self.setLayout(QHBoxLayout())
-        self.layout().addWidget(btn)
+#         self.setLayout(QHBoxLayout())
+#         self.layout().addWidget(btn)
 
-    def _on_click(self):
-        print("napari has", len(self.viewer.layers), "layers")
+#     def _on_click(self):
+#         print("napari has", len(self.viewer.layers), "layers")
