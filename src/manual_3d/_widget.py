@@ -195,15 +195,15 @@ class FindPeaks(QWidget):
         self.update_layer_list()  # Fill the combo box with existing layers
         layout.addWidget(self.layer_selector)
 
-        # Checkbox to enable/disable the custom mouse callback
-        self.checkbox = QCheckBox("Enable Mouse Callback")
+        # Checkbox to enable/disable the custom callback
+        self.checkbox = QCheckBox("Enable Point Added Callback")
         layout.addWidget(self.checkbox)
 
         # Connect the dropdown to automatically link when a selection is made
         self.layer_selector.currentIndexChanged.connect(self.link_to_points_layer)
 
-        # Connect the checkbox to control the mouse callback behavior
-        self.checkbox.stateChanged.connect(self.toggle_mouse_callback)
+        # Connect the checkbox to control the point-added callback behavior
+        self.checkbox.stateChanged.connect(self.toggle_point_added_callback)
 
         # Connect to the Napari viewer's layer insertion event
         self.viewer.layers.events.inserted.connect(self.on_layer_inserted)
@@ -237,15 +237,35 @@ class FindPeaks(QWidget):
         else:
             print("No Points layer selected.")
 
-    def toggle_mouse_callback(self, state):
-        """Enable or disable the custom mouse callback based on the checkbox."""
+    def toggle_point_added_callback(self, state):
+        """Enable or disable the point-added callback based on the checkbox."""
+        if self.points_layer is None:
+            print("No points layer selected to monitor.")
+            return
+
         if state == Qt.Checked:
-            self.viewer.mouse_drag_callbacks.append(self.mouse_click_callback)
-            print("Mouse click callback enabled.")
+            # Connect to the points layer's event for data changes
+            self.points_layer.events.data.connect(self.on_point_added)
+            print("Point added callback enabled.")
         else:
-            if self.mouse_click_callback in self.viewer.mouse_drag_callbacks:
-                self.viewer.mouse_drag_callbacks.remove(self.mouse_click_callback)
-            print("Mouse click callback disabled.")
+            # Disconnect the point added event
+            self.points_layer.events.data.disconnect(self.on_point_added)
+            print("Point added callback disabled.")
+
+    def on_point_added(self, event):
+        """Callback triggered when a new point is added to the points layer."""
+        # Get the added point
+        added_point = self.points_layer.data[-1]  # Last point added to the layer
+        print(f"New point added at: {added_point}")
+
+        # Custom behavior when the point is added
+        self.handle_new_point(added_point)
+
+    def handle_new_point(self, point):
+        """Handle what happens when a point is added."""
+        # Add custom behavior for when a point is added
+        print(f"Handling new point at: {point}")
+        # Example: Highlight the point, trigger other actions, etc.
 
     def showEvent(self, event):
         """Triggered when the widget is shown, updates the layer list."""
@@ -254,27 +274,11 @@ class FindPeaks(QWidget):
         super().showEvent(event)
 
     def hideEvent(self, event):
-        """Triggered when the widget is hidden, disconnects the mouse click event if active."""
-        if self.mouse_click_callback in self.viewer.mouse_drag_callbacks:
-            self.viewer.mouse_drag_callbacks.remove(self.mouse_click_callback)
-        print("Mouse click callback unlinked upon hiding.")
+        """Triggered when the widget is hidden, disconnect the point added callback if active."""
+        if self.points_layer is not None and self.checkbox.isChecked():
+            self.points_layer.events.data.disconnect(self.on_point_added)
+        print("Point added callback unlinked upon hiding.")
         super().hideEvent(event)
-
-    def mouse_click_callback(self, viewer, event):
-        """Callback function to store the mouse position when clicked and add it to the points layer."""
-        # Check if we are in 2D or 3D mode
-        if self.viewer.dims.ndisplay == 2:
-            position = event.position  # 2D world coordinates
-            print(f"Mouse clicked at (2D): {position}")
-        else:
-            # 3D world coordinates
-            position = event.position  # Already in 3D world coordinates
-            print(f"Mouse clicked at (3D): {position}")
-
-        # Add the position to the linked points layer if one is selected
-        if self.points_layer is not None:
-            self.points_layer.add([position])
-            print(f"Added point at: {position} to the points layer.")
 
 
 # Napari plugin function
