@@ -18,6 +18,11 @@ contributions:
     - id: manual-3d.make_sample_data
       python_name: manual_3d._sample_data:make_sample_data
       title: Load sample data from manual-3d
+    # Set voxel
+    - id: manual-3d.change_voxel_size
+      python_name: manual_3d:change_voxel_size
+      title: ChangeVoxelSize
+    # Find peaks
     - id: manual-3d.widget_find_peaks
       python_name: manual_3d:FindPeaks
       title: FindPeaks
@@ -53,6 +58,10 @@ contributions:
       display_name: manual-3d
       key: unique_id.1
   widgets:
+    # Find peaks
+    - command: manual-3d.change_voxel_size
+      display_name: ChangeVoxelSize
+    # Find peaks
     - command: manual-3d.widget_find_peaks
       display_name: FindPeaks
     # - command: manual-3d.make_container_widget
