@@ -166,17 +166,39 @@ from qtpy.QtWidgets import QApplication, QWidget
 
 
 # class ExampleQWidget(QWidget):
-class FindPeaks(QWidget):
-    # your QWidget.__init__ can optionally request the napari viewer instance
-    # use a type annotation of 'napari.viewer.Viewer' for any parameter
-    def __init__(self, viewer: Viewer) -> None:
-        super().__init__()
-        self.app = QApplication.instance()
-        # Create a button
-        btn = QPushButton("Click me!")
-        # Connect the click event to a function
-        btn.clicked.connect(self._on_click)
-        self.app.aboutToQuit.connect(self.on_close_callback)
 
-    def on_close_callback(self) -> None:
-        print('See ya chums')
+import napari
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel
+from qtpy.QtCore import Qt
+
+
+class FindPeaks(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        self.viewer = napari_viewer
+        self.setWindowTitle("Custom Hide Event in Napari")
+        self.setGeometry(100, 100, 300, 200)
+
+        # Layout and UI components
+        layout = QVBoxLayout()
+        self.label = QLabel("Hide or Show this panel to trigger a function")
+        layout.addWidget(self.label)
+
+        self.setLayout(layout)
+
+    def hideEvent(self, event):
+        """Triggered when the widget is hidden"""
+        self.on_hide()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        """Triggered when the widget is shown"""
+        self.on_show()
+        super().showEvent(event)
+
+    def on_hide(self):
+        print("Widget was hidden in Napari")
+
+    def on_show(self):
+        print("Widget was shown in Napari")
