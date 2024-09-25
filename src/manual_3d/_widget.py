@@ -168,7 +168,7 @@ from qtpy.QtWidgets import QApplication, QWidget
 # class ExampleQWidget(QWidget):
 
 import napari
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QComboBox
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QComboBox, QCheckBox
 from qtpy.QtCore import Qt
 
 
@@ -195,8 +195,15 @@ class FindPeaks(QWidget):
         self.update_layer_list()  # Fill the combo box with existing layers
         layout.addWidget(self.layer_selector)
 
+        # Checkbox to enable/disable the custom mouse callback
+        self.checkbox = QCheckBox("Enable Mouse Callback")
+        layout.addWidget(self.checkbox)
+
         # Connect the dropdown to automatically link when a selection is made
         self.layer_selector.currentIndexChanged.connect(self.link_to_points_layer)
+
+        # Connect the checkbox to control the mouse callback behavior
+        self.checkbox.stateChanged.connect(self.toggle_mouse_callback)
 
         # Connect to the Napari viewer's layer insertion event
         self.viewer.layers.events.inserted.connect(self.on_layer_inserted)
@@ -230,18 +237,27 @@ class FindPeaks(QWidget):
         else:
             print("No Points layer selected.")
 
+    def toggle_mouse_callback(self, state):
+        """Enable or disable the custom mouse callback based on the checkbox."""
+        if state == Qt.Checked:
+            self.viewer.mouse_drag_callbacks.append(self.mouse_click_callback)
+            print("Mouse click callback enabled.")
+        else:
+            if self.mouse_click_callback in self.viewer.mouse_drag_callbacks:
+                self.viewer.mouse_drag_callbacks.remove(self.mouse_click_callback)
+            print("Mouse click callback disabled.")
+
     def showEvent(self, event):
-        """Triggered when the widget is shown, connects the mouse click event."""
-        self.viewer.mouse_drag_callbacks.append(self.mouse_click_callback)
+        """Triggered when the widget is shown, updates the layer list."""
         self.update_layer_list()  # Update the list of layers whenever the widget is shown
-        print("Mouse click callback linked.")
+        print("Widget shown and layer list updated.")
         super().showEvent(event)
 
     def hideEvent(self, event):
-        """Triggered when the widget is hidden, disconnects the mouse click event."""
+        """Triggered when the widget is hidden, disconnects the mouse click event if active."""
         if self.mouse_click_callback in self.viewer.mouse_drag_callbacks:
             self.viewer.mouse_drag_callbacks.remove(self.mouse_click_callback)
-        print("Mouse click callback unlinked.")
+        print("Mouse click callback unlinked upon hiding.")
         super().hideEvent(event)
 
     def mouse_click_callback(self, viewer, event):
@@ -252,7 +268,6 @@ class FindPeaks(QWidget):
             print(f"Mouse clicked at (2D): {position}")
         else:
             # 3D world coordinates
-            # Need to convert the click to world coordinates in 3D
             position = event.position  # Already in 3D world coordinates
             print(f"Mouse clicked at (3D): {position}")
 
@@ -260,12 +275,6 @@ class FindPeaks(QWidget):
         if self.points_layer is not None:
             self.points_layer.add([position])
             print(f"Added point at: {position} to the points layer.")
-
-    def on_hide(self):
-        print("Widget was hidden")
-
-    def on_show(self):
-        print("Widget was shown")
 
 
 # Napari plugin function
