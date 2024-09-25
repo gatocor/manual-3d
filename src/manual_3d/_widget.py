@@ -168,7 +168,7 @@ from qtpy.QtWidgets import QApplication, QWidget
 # class ExampleQWidget(QWidget):
 
 import napari
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QComboBox
 from qtpy.QtCore import Qt
 
 
@@ -177,28 +177,97 @@ class FindPeaks(QWidget):
         super().__init__()
 
         self.viewer = napari_viewer
-        self.setWindowTitle("Custom Hide Event in Napari")
+        self.points_layer = None  # This will store the linked points layer
+
+        # Set up the UI
+        self.setWindowTitle("FindPeaks")
         self.setGeometry(100, 100, 300, 200)
 
-        # Layout and UI components
+        # Layout
         layout = QVBoxLayout()
-        self.label = QLabel("Hide or Show this panel to trigger a function")
+
+        # Label
+        self.label = QLabel("Select a Points layer:")
         layout.addWidget(self.label)
+
+        # Combo box to select existing points layer
+        self.layer_selector = QComboBox()
+        self.update_layer_list()  # Fill the combo box with existing layers
+        layout.addWidget(self.layer_selector)
+
+        # Connect the dropdown to automatically link when a selection is made
+        self.layer_selector.currentIndexChanged.connect(self.link_to_points_layer)
+
+        # Connect to the Napari viewer's layer insertion event
+        self.viewer.layers.events.inserted.connect(self.on_layer_inserted)
 
         self.setLayout(layout)
 
-    def hideEvent(self, event):
-        """Triggered when the widget is hidden"""
-        self.on_hide()
-        super().hideEvent(event)
+    def update_layer_list(self):
+        """Update the combo box with existing points layers."""
+        self.layer_selector.clear()
+
+        # Add all existing Points layers to the combo box
+        for layer in self.viewer.layers:
+            if isinstance(layer, napari.layers.Points):
+                self.layer_selector.addItem(layer.name)
+
+    def on_layer_inserted(self, event):
+        """Triggered when a new layer is added to the viewer."""
+        new_layer = event.value
+        if isinstance(new_layer, napari.layers.Points):
+            self.layer_selector.addItem(new_layer.name)
+            print(f"New Points layer '{new_layer.name}' added to the combo box.")
+
+    def link_to_points_layer(self):
+        """Link the widget to the selected points layer."""
+        selected_item = self.layer_selector.currentText()
+
+        if selected_item:
+            # Link to the selected existing points layer
+            self.points_layer = self.viewer.layers[selected_item]
+            print(f"Linked to existing points layer: {selected_item}")
+        else:
+            print("No Points layer selected.")
 
     def showEvent(self, event):
-        """Triggered when the widget is shown"""
-        self.on_show()
+        """Triggered when the widget is shown, connects the mouse click event."""
+        self.viewer.mouse_drag_callbacks.append(self.mouse_click_callback)
+        self.update_layer_list()  # Update the list of layers whenever the widget is shown
+        print("Mouse click callback linked.")
         super().showEvent(event)
 
+    def hideEvent(self, event):
+        """Triggered when the widget is hidden, disconnects the mouse click event."""
+        if self.mouse_click_callback in self.viewer.mouse_drag_callbacks:
+            self.viewer.mouse_drag_callbacks.remove(self.mouse_click_callback)
+        print("Mouse click callback unlinked.")
+        super().hideEvent(event)
+
+    def mouse_click_callback(self, viewer, event):
+        """Callback function to store the mouse position when clicked and add it to the points layer."""
+        # Check if we are in 2D or 3D mode
+        if self.viewer.dims.ndisplay == 2:
+            position = event.position  # 2D world coordinates
+            print(f"Mouse clicked at (2D): {position}")
+        else:
+            # 3D world coordinates
+            # Need to convert the click to world coordinates in 3D
+            position = event.position  # Already in 3D world coordinates
+            print(f"Mouse clicked at (3D): {position}")
+
+        # Add the position to the linked points layer if one is selected
+        if self.points_layer is not None:
+            self.points_layer.add([position])
+            print(f"Added point at: {position} to the points layer.")
+
     def on_hide(self):
-        print("Widget was hidden in Napari")
+        print("Widget was hidden")
 
     def on_show(self):
-        print("Widget was shown in Napari")
+        print("Widget was shown")
+
+
+# Napari plugin function
+def napari_experimental_provide_dock_widget():
+    return FindPeaks
