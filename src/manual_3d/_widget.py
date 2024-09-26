@@ -168,9 +168,9 @@ from qtpy.QtWidgets import QApplication, QWidget
 # class ExampleQWidget(QWidget):
 
 import napari
+import numpy as np
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QComboBox, QCheckBox
 from qtpy.QtCore import Qt
-
 
 class FindPeaks(QWidget):
     def __init__(self, napari_viewer):
@@ -178,6 +178,14 @@ class FindPeaks(QWidget):
 
         self.viewer = napari_viewer
         self.points_layer = None  # This will store the linked points layer
+        self.vectors_layer = None  # Vectors layer to show directions
+
+        # To store the two points and directions
+        self.point1 = None
+        self.direction1 = None
+        self.point2 = None
+        self.direction2 = None
+        self.counter = 0
 
         # Set up the UI
         self.setWindowTitle("FindPeaks")
@@ -194,16 +202,19 @@ class FindPeaks(QWidget):
         self.layer_selector = QComboBox()
         self.update_layer_list()  # Fill the combo box with existing layers
         layout.addWidget(self.layer_selector)
+        # Connect the dropdown to automatically link when a selection is made
+        self.layer_selector.currentIndexChanged.connect(self.link_to_points_layer)
 
         # Checkbox to enable/disable the custom callback
         self.checkbox = QCheckBox("Enable Point Added Callback")
         layout.addWidget(self.checkbox)
-
-        # Connect the dropdown to automatically link when a selection is made
-        self.layer_selector.currentIndexChanged.connect(self.link_to_points_layer)
-
         # Connect the checkbox to control the point-added callback behavior
         self.checkbox.stateChanged.connect(self.toggle_point_added_callback)
+
+        # Checkbox to enable/disable the custom callback
+        self.vectorcheckbox = QCheckBox("Debug")
+        layout.addWidget(self.vectorcheckbox)
+        self.vectorcheckbox.stateChanged.connect(self.make_vector_layer)
 
         # Connect to the Napari viewer's layer insertion event
         self.viewer.layers.events.inserted.connect(self.on_layer_inserted)
@@ -246,26 +257,172 @@ class FindPeaks(QWidget):
         if state == Qt.Checked:
             # Connect to the points layer's event for data changes
             self.points_layer.events.data.connect(self.on_point_added)
+            self.point1 = None
+            self.point2 = None
             print("Point added callback enabled.")
         else:
             # Disconnect the point added event
             self.points_layer.events.data.disconnect(self.on_point_added)
+            self.point1 = None
+            self.point2 = None
             print("Point added callback disabled.")
 
     def on_point_added(self, event):
         """Callback triggered when a new point is added to the points layer."""
-        # Get the added point
-        added_point = self.points_layer.data[-1]  # Last point added to the layer
-        print(f"New point added at: {added_point}")
 
-        # Custom behavior when the point is added
-        self.handle_new_point(added_point)
+        if self.counter == 0:
+            self.counter = 1
+            return
+        else:
+            self.counter = 0
+        
+        # Check if the points layer is empty before proceeding
+        if len(self.points_layer.data) == 0:
+            print("Points layer is empty. No action taken.")
+            return
 
-    def handle_new_point(self, point):
-        """Handle what happens when a point is added."""
-        # Add custom behavior for when a point is added
-        print(f"Handling new point at: {point}")
-        # Example: Highlight the point, trigger other actions, etc.
+        if self.viewer.dims.ndisplay != 3:
+            print("Not in 3D mode. No action taken.")
+            return
+
+        # Get the added point (most recent point is the first one)
+        new_point = self.points_layer.data[-1]  # First point added to the layer
+
+        # If it's the first point, store it and its direction
+        if self.point1 is None:
+            self.point1 = new_point
+            self.direction1 = self.compute_camera_direction()  # Replace with your own logic to get direction
+            print(f"First point stored at: {self.point1}, direction: {self.direction1}")
+        elif self.point2 is None:
+            # If it's the second point, store it and calculate the closest point
+            self.point2 = new_point
+            self.direction2 = self.compute_camera_direction()  # Replace with your own logic to get direction
+            print(f"Second point stored at: {self.point2}, direction: {self.direction2}")
+
+            # Calculate the closest point between the two lines
+            closest_point = self.calculate_closest_point(self.point1, self.direction1, self.point2, self.direction2)
+            print(f"Closest point calculated at: {closest_point}")
+
+            # Remove the last two points (the first two added) and add the calculated closest point at the beginning
+            self.update_points_layer_with_closest_point(closest_point)
+
+            # Update vectors layer with the vectors from points and directions
+            if self.vectorcheckbox.isChecked():
+                self.update_vectors_layer()
+
+            # Reset point storage for the next pair of points
+            self.point1 = None
+            self.point2 = None
+
+    def update_points_layer_with_closest_point(self, closest_point):
+        """
+        Update the points layer: Remove the first two points and add the calculated closest point to the beginning.
+        """
+        # Check if there are at least two points in the layer before removing
+        if len(self.points_layer.data) < 2:
+            print("Not enough points in the layer to remove two points.")
+            return
+
+        # Remove the first two points (most recently added)
+        self.points_layer.data = self.points_layer.data[:-2]
+
+        # Add the calculated closest point to the beginning of the layer
+        self.points_layer.data = np.vstack([self.points_layer.data, closest_point])
+
+        print(f"First two points removed and closest point {closest_point} appended.")
+
+    def make_vector_layer(self):
+        """Update the combo box with existing points layers."""
+        if "Debug" in self.viewer.layers:
+            if isinstance(self.viewer.layers["Debug"], napari.layers.Vectors):
+                del self.viewer.layers["Debug"]
+
+        # Add all existing Points layers to the combo box
+        self.vectors_layer = self.viewer.add_vectors(
+            np.zeros([0,2,3]), 
+            name='Debug_Vectors', 
+            length=100,
+            edge_width=2, 
+            edge_color='green')
+
+    def update_vectors_layer(self):
+        """Update or create a vectors layer to visualize the directions from the points."""
+        # Define the vector data format: [start_point, vector]
+        vectors_data = np.array([
+            [self.point1, self.direction1],
+            [self.point2, self.direction2]
+        ])
+        
+        self.vectors_layer.data = vectors_data
+        print("Vectors layer updated.")
+
+    def compute_camera_direction(self):
+        """
+        Compute the camera direction using the Euler angles and center of the camera.
+        Napari gives the camera's Euler angles in degrees and the center of rotation.
+        """
+
+        return self.viewer.camera.calculate_nd_view_direction(3,self.viewer.dims.order)
+
+    def calculate_closest_point(self, P1, d1, P2, d2):
+        """
+        Finds the closest points on two skew (non-intersecting) lines in 3D.
+        
+        Parameters:
+        P1 : np.array
+            A point on line 1 (3D vector).
+        d1 : np.array
+            The direction vector of line 1 (3D vector).
+        P2 : np.array
+            A point on line 2 (3D vector).
+        d2 : np.array
+            The direction vector of line 2 (3D vector).
+            
+        Returns:
+        Q1 : np.array
+            Closest point on line 1 to line 2 (3D vector).
+        Q2 : np.array
+            Closest point on line 2 to line 1 (3D vector).
+        distance : float
+            The shortest distance between the two lines.
+        """
+        
+        # Convert input points and direction vectors to numpy arrays
+        P1 = np.array(P1)
+        d1 = np.array(d1)
+        P2 = np.array(P2)
+        d2 = np.array(d2)
+        
+        # Vector between the two points
+        P12 = P2 - P1
+        
+        # Cross product of the direction vectors
+        n = np.cross(d1, d2)
+        
+        # # If the cross product is zero, the lines are parallel
+        # if np.allclose(n, 0):
+        #     raise ValueError("The lines are parallel and do not have a unique closest pair of points.")
+        
+        # Coefficients for the system of equations
+        d1_dot_d1 = np.dot(d1, d1)
+        d2_dot_d2 = np.dot(d2, d2)
+        d1_dot_d2 = np.dot(d1, d2)
+        P12_dot_d1 = np.dot(P12, d1)
+        P12_dot_d2 = np.dot(P12, d2)
+        
+        # Solving for t1 and t2 using Cramer's rule
+        denominator = d1_dot_d1 * d2_dot_d2 - d1_dot_d2**2
+        t1 = (P12_dot_d1 * d2_dot_d2 - P12_dot_d2 * d1_dot_d2) / denominator
+        t2 = (P12_dot_d1 * d1_dot_d2 - P12_dot_d2 * d1_dot_d1) / denominator
+        
+        # Find the closest points on each line
+        Q1 = P1 + t1 * d1  # Closest point on line 1
+        Q2 = P2 + t2 * d2  # Closest point on line 2
+        
+        # Compute the shortest distance between the two lines
+        distance = np.linalg.norm(Q1 - Q2)
+        
+        return ( Q1 + Q2 ) /2
 
     def showEvent(self, event):
         """Triggered when the widget is shown, updates the layer list."""
