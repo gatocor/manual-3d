@@ -22,6 +22,10 @@ contributions:
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
       title: SetUpTracking
+    # LoadTracking
+    - id: manual-3d.LoadTracking
+      python_name: manual_3d:LoadTracking
+      title: LoadTracking
     # Find peaks
     - id: manual-3d.widget_find_peaks
       python_name: manual_3d:FindPeaks
@@ -61,6 +65,9 @@ contributions:
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking
+    # LoadTracking
+    - command: manual-3d.LoadTracking
+      display_name: LoadTracking
     # Find peaks
     - command: manual-3d.change_voxel_size
       display_name: ChangeVoxelSize
