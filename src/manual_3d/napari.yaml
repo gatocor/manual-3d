@@ -18,14 +18,6 @@ contributions:
     - id: manual-3d.make_sample_data
       python_name: manual_3d._sample_data:make_sample_data
       title: Load sample data from manual-3d
-    # Load Movie
-    - id: manual-3d.load_movie
-      python_name: manual_3d:load_movie
-      title: LoadMovie
-    # Set voxel
-    - id: manual-3d.change_voxel_size
-      python_name: manual_3d:change_voxel_size
-      title: ChangeVoxelSize
     # SetUpTracking
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
@@ -66,9 +58,6 @@ contributions:
       display_name: manual-3d
       key: unique_id.1
   widgets:
-    # Load Movie
-    - command: manual-3d.load_movie
-      display_name: LoadMovie
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking

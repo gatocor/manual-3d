@@ -45,65 +45,10 @@ from scipy.ndimage import gaussian_filter
 from skimage.feature import peak_local_max
 import napari
 import re
+import json
 
 if TYPE_CHECKING:
     import napari
-
-
-# Uses the `autogenerate: true` flag in the plugin manifest
-# to indicate it should be wrapped as a magicgui to autogenerate
-# a widget.
-def set_voxel(
-    img: "napari.types.ImageData",
-    threshold: "float",
-) -> "napari.types.ImageData":
-    return img_as_float(img) > threshold
-
-
-# def activate_widget(
-#     img: "napari.types.PointsData",
-#     threshold: "float",
-# ) -> None:
-#     print("Hi")
-#     return
-
-
-# # the magic_factory decorator lets us customize aspects of our widget
-# # we specify a widget type for the threshold parameter
-# # and use auto_call=True so the function is called whenever
-# # the value of a parameter changes
-# @magic_factory(
-#     threshold={"widget_type": "FloatSlider", "max": 1}, auto_call=True
-# )
-# def threshold_magic_widget(
-#     img_layer: "napari.layers.Image", threshold: "float"
-# ) -> "napari.types.LabelsData":
-#     return img_as_float(img_layer.data) > threshold
-
-@magic_factory(
-    path_data={"widget_type": FileEdit, "mode": "d"},
-    call_button="Load",
-)
-def load_movie(
-    path_data: "str",
-    start_point: "int",
-    end_point: "int",
-    format: "str" = "t{:04d}_H2BemiRFP670",
-    extension: "str" = ".tif",
-    voxel_x: "float" = 1.0,
-    voxel_y: "float" = 1.0,
-    voxel_z: "float" = 1.0
-) -> "napari.types.LayerDataTuple":
-    
-    # Read the image data (assuming read_split_times is defined elsewhere)
-    image = read_split_times(str(path_data), range(start_point, end_point + 1), format, extension=extension)[0][:, :, 0, :, :]
-    print(image.shape)
-    
-    # Set the scale using the voxel sizes
-    scale = [voxel_z, voxel_y, voxel_x]
-    
-    # Return the image data along with metadata including the scale
-    return (image, {"scale": scale}, "image")
 
 class SetUpTracking(QWidget):
     def __init__(self, napari_viewer):
@@ -145,13 +90,19 @@ class SetUpTracking(QWidget):
         # Voxel sizes
         self.voxel_x_label = QLabel("Voxel X:")
         self.voxel_x_input = QDoubleSpinBox(self)
-        self.voxel_x_input.setValue(1.0)
+        self.voxel_x_input.setDecimals(3)  # Allow three decimal places
+        self.voxel_x_input.setValue(0.347)
+        self.voxel_x_input.setSingleStep(0.001)  # Step size for adjustment
         self.voxel_y_label = QLabel("Voxel Y:")
         self.voxel_y_input = QDoubleSpinBox(self)
-        self.voxel_y_input.setValue(1.0)
+        self.voxel_y_input.setDecimals(3)  # Allow three decimal places
+        self.voxel_y_input.setValue(0.347)
+        self.voxel_y_input.setSingleStep(0.001)  # Step size for adjustment
         self.voxel_z_label = QLabel("Voxel Z:")
         self.voxel_z_input = QDoubleSpinBox(self)
-        self.voxel_z_input.setValue(1.0)
+        self.voxel_z_input.setDecimals(3)  # Allow three decimal places
+        self.voxel_z_input.setValue(2.0)
+        self.voxel_z_input.setSingleStep(0.001)  # Step size for adjustment
         self.layout.addWidget(self.voxel_x_label)
         self.layout.addWidget(self.voxel_x_input)
         self.layout.addWidget(self.voxel_y_label)
@@ -262,9 +213,9 @@ class SetUpTracking(QWidget):
         scale = [voxel_z, voxel_y, voxel_x]
         
         # Launch the Napari viewer
-        self.viewer.add_image(image, scale=scale, name="Loaded Image")
+        self.viewer.add_image(image, scale=scale, name="Image "+self.path_input.text().split("/")[-1])
 
-        return # (image, {"scale": scale}, "image")
+        return
 
 
 # if we want even more control over our widget, we can use
