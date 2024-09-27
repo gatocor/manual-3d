@@ -6,15 +6,17 @@ except ImportError:
 
 from ._reader import napari_get_reader
 from ._sample_data import make_sample_data
-from ._widget import change_voxel_size, FindPeaks#ExampleQWidget, ImageThreshold, threshold_autogenerate_widget, threshold_magic_widget, activate_widget
 from ._writer import write_multiple, write_single_image
+from ._widget import load_movie, SetUpTracking, FindPeaks#ExampleQWidget, ImageThreshold, threshold_autogenerate_widget, threshold_magic_widget, activate_widget
 
 __all__ = (
     "napari_get_reader",
     "write_single_image",
     "write_multiple",
     "make_sample_data",
-    "change_voxel_size"
+    "load_movie",
+    "change_voxel_size",
+    "SetUpTracking",
     "FindPeaks",
     # "ExampleQWidget",
     # "ImageThreshold",

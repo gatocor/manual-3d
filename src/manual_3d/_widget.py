@@ -32,9 +32,19 @@ from typing import TYPE_CHECKING
 
 from magicgui import magic_factory
 from magicgui.widgets import CheckBox, Container, create_widget
-from qtpy.QtWidgets import QHBoxLayout, QPushButton, QWidget
+from qtpy.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox
+)
+from qtpy.QtCore import Qt
+import os
 from skimage.util import img_as_float
 import numpy as np
+from magicgui.widgets import FileEdit
+from .utils import *
+from scipy.ndimage import gaussian_filter
+from skimage.feature import peak_local_max
+import napari
+import re
 
 if TYPE_CHECKING:
     import napari
@@ -70,32 +80,192 @@ def set_voxel(
 # ) -> "napari.types.LabelsData":
 #     return img_as_float(img_layer.data) > threshold
 
-# the magic_factory decorator lets us customize aspects of our widget
-# we specify a widget type for the threshold parameter
-# and use auto_call=True so the function is called whenever
-# the value of a parameter changes
 @magic_factory(
-    voxel_x={"widget_type": "FloatSlider", "max": 10},
-    voxel_y={"widget_type": "FloatSlider", "max": 10},
-    voxel_z={"widget_type": "FloatSlider", "max": 10}, 
-    call_button="Set Voxel Size",
-    auto_call=False
+    path_data={"widget_type": FileEdit, "mode": "d"},
+    call_button="Load",
 )
-def change_voxel_size(
-    img_layer: "napari.layers.Image", 
-    voxel_x: "float",
-    voxel_y: "float",
-    voxel_z: "float",
-    viewer: "napari.viewer.Viewer", 
-) -> None:#-> "napari.types.image":
-    voxel = (voxel_z,voxel_y,voxel_x)
-    shape = img_layer.data.shape
-    if np.any(np.array(voxel)>0):
-        #Set scale
-        img_layer.scale = voxel
-        #Reset camera center
-        viewer.camera.center = tuple(np.array(voxel)*shape/2)
-    return
+def load_movie(
+    path_data: "str",
+    start_point: "int",
+    end_point: "int",
+    format: "str" = "t{:04d}_H2BemiRFP670",
+    extension: "str" = ".tif",
+    voxel_x: "float" = 1.0,
+    voxel_y: "float" = 1.0,
+    voxel_z: "float" = 1.0
+) -> "napari.types.LayerDataTuple":
+    
+    # Read the image data (assuming read_split_times is defined elsewhere)
+    image = read_split_times(str(path_data), range(start_point, end_point + 1), format, extension=extension)[0][:, :, 0, :, :]
+    print(image.shape)
+    
+    # Set the scale using the voxel sizes
+    scale = [voxel_z, voxel_y, voxel_x]
+    
+    # Return the image data along with metadata including the scale
+    return (image, {"scale": scale}, "image")
+
+class SetUpTracking(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.path_label = QLabel("Path to Data Folder:")
+        self.path_input = QLineEdit(self)
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_folder)
+        self.layout.addWidget(self.path_label)
+        self.layout.addWidget(self.path_input)
+        self.layout.addWidget(self.browse_button)
+
+        # Start and end points
+        self.start_label = QLabel("Start Point:")
+        self.start_input = QSpinBox(self)
+        self.start_input.setMinimum(0)
+        self.end_label = QLabel("End Point:")
+        self.end_input = QSpinBox(self)
+        self.end_input.setMinimum(0)
+        self.layout.addWidget(self.start_label)
+        self.layout.addWidget(self.start_input)
+        self.layout.addWidget(self.end_label)
+        self.layout.addWidget(self.end_input)
+
+        # Format input
+        self.format_label = QLabel("Format:")
+        self.format_input = QLineEdit(self)
+        self.layout.addWidget(self.format_label)
+        self.layout.addWidget(self.format_input)
+
+        # Voxel sizes
+        self.voxel_x_label = QLabel("Voxel X:")
+        self.voxel_x_input = QDoubleSpinBox(self)
+        self.voxel_x_input.setValue(1.0)
+        self.voxel_y_label = QLabel("Voxel Y:")
+        self.voxel_y_input = QDoubleSpinBox(self)
+        self.voxel_y_input.setValue(1.0)
+        self.voxel_z_label = QLabel("Voxel Z:")
+        self.voxel_z_input = QDoubleSpinBox(self)
+        self.voxel_z_input.setValue(1.0)
+        self.layout.addWidget(self.voxel_x_label)
+        self.layout.addWidget(self.voxel_x_input)
+        self.layout.addWidget(self.voxel_y_label)
+        self.layout.addWidget(self.voxel_y_input)
+        self.layout.addWidget(self.voxel_z_label)
+        self.layout.addWidget(self.voxel_z_input)
+
+        # Load button
+        self.load_button = QPushButton("Load Movie")
+        self.load_button.clicked.connect(self.load_movie)
+        self.layout.addWidget(self.load_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def browse_folder(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.path_input.setText(folder_path)
+            self.count_files_in_folder(folder_path)
+            self.detect_file_pattern(folder_path)
+
+    def count_files_in_folder(self, folder_path):
+        """Count the number of files in the selected folder and set the start and end points."""
+        try:
+            file_list = os.listdir(folder_path)
+            self.file_count = len(file_list)
+        except Exception as e:
+            print(f"Error counting files: {e}")
+
+    def detect_file_pattern(self, folder_path):
+        """Detect the file naming pattern, start and end points, and suggest it as the format."""
+        try:
+            file_list = os.listdir(folder_path)
+            file_list = [f for f in file_list if os.path.isfile(os.path.join(folder_path, f))]
+            file_list.sort()  # Ensure the files are sorted correctly
+
+            if len(file_list) < 2:
+                return  # We need at least two files to detect a pattern
+
+            # Compare first two filenames to identify the changing numeric pattern
+            file_1, file_2 = file_list[0], file_list[1]
+            format_str = []
+            num_pattern = re.compile(r'\d+')  # Pattern to match numbers
+            numeric_values = []
+
+            i = 0
+            while i < len(file_1):
+                if i < len(file_2) and file_1[i] == file_2[i]:
+                    format_str.append(file_1[i])  # If characters are the same, add them to format
+                elif num_pattern.match(file_1[i:]):
+                    # Detect numeric sequence, determine its length
+                    num_match_1 = num_pattern.match(file_1[i:])
+                    num_match_2 = num_pattern.match(file_2[i:])
+                    
+                    if num_match_1 and num_match_2:
+                        length_1 = len(num_match_1.group(0))
+                        length_2 = len(num_match_2.group(0))
+                        if length_1 == length_2:  # Only replace if the lengths of numbers are the same
+                            format_str.append(f"{{:0{length_1}d}}")
+                            # Collect the numeric values from all files to detect min/max
+                            for file_name in file_list:
+                                match = num_pattern.search(file_name)
+                                if match:
+                                    numeric_values.append(int(match.group(0)))
+                            i += length_1 - 1  # Skip past the numeric part
+                        else:
+                            format_str.append(file_1[i])
+                    else:
+                        format_str.append(file_1[i])
+                else:
+                    format_str.append(file_1[i])
+                i += 1
+
+            # Join format string and update the format input
+            detected_format = ''.join(format_str)
+            self.format_input.setText(detected_format)
+
+            # Set start and end points based on the detected numeric sequence
+            if numeric_values:
+                self.start_input.setValue(min(numeric_values))
+                self.end_input.setValue(max(numeric_values))
+
+        except Exception as e:
+            print(f"Error detecting file pattern: {e}")
+
+    def load_movie(self):
+        """Load the movie based on the user input."""
+        path_data = self.path_input.text()
+        start_point = self.start_input.value()
+        end_point = self.end_input.value()
+        format_str = self.format_input.text()
+        voxel_x = self.voxel_x_input.value()
+        voxel_y = self.voxel_y_input.value()
+        voxel_z = self.voxel_z_input.value()
+
+        # Assuming read_split_times function is defined elsewhere
+        image = read_split_times(
+            str(path_data),
+            range(start_point, end_point + 1),
+            format_str
+        )[0][:, :, 0, :, :]
+        
+        scale = [voxel_z, voxel_y, voxel_x]
+        
+        # Launch the Napari viewer
+        self.viewer.add_image(image, scale=scale, name="Loaded Image")
+
+        return # (image, {"scale": scale}, "image")
+
 
 # if we want even more control over our widget, we can use
 # magicgui `Container`
@@ -440,4 +610,4 @@ class FindPeaks(QWidget):
 
 # Napari plugin function
 def napari_experimental_provide_dock_widget():
-    return FindPeaks
+    return SetUpTracking
