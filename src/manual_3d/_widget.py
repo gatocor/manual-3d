@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from magicgui import magic_factory
 from magicgui.widgets import CheckBox, Container, create_widget
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox
+    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox
 )
 from qtpy.QtCore import Qt
 import os
@@ -73,9 +73,11 @@ class SetUpTracking(QWidget):
         self.start_label = QLabel("Start Point:")
         self.start_input = QSpinBox(self)
         self.start_input.setMinimum(0)
+        self.start_input.setMaximum(999999)
         self.end_label = QLabel("End Point:")
         self.end_input = QSpinBox(self)
         self.end_input.setMinimum(0)
+        self.end_input.setMaximum(999999)
         self.layout.addWidget(self.start_label)
         self.layout.addWidget(self.start_input)
         self.layout.addWidget(self.end_label)
@@ -162,8 +164,8 @@ class SetUpTracking(QWidget):
             if len(file_list) < 2:
                 return  # We need at least two files to detect a pattern
 
-            # Compare first two filenames to identify the changing numeric pattern
-            file_1, file_2 = file_list[0], file_list[1]
+            # Compare first and final filenames to identify the changing numeric pattern
+            file_1, file_2 = file_list[0], file_list[-1]
             format_str = []
             num_pattern = re.compile(r'\d+')  # Pattern to match numbers
             numeric_values = []
@@ -181,7 +183,7 @@ class SetUpTracking(QWidget):
                         length_1 = len(num_match_1.group(0))
                         length_2 = len(num_match_2.group(0))
                         if length_1 == length_2:  # Only replace if the lengths of numbers are the same
-                            format_str.append(f"{{:0{length_1}d}}")
+                            format_str.append(f"{{:0{length_1}d}}")  # Use the correct number of digits
                             # Collect the numeric values from all files to detect min/max
                             for file_name in file_list:
                                 match = num_pattern.search(file_name)
@@ -208,6 +210,7 @@ class SetUpTracking(QWidget):
         except Exception as e:
             print(f"Error detecting file pattern: {e}")
 
+
     def save_to_json(self):
         """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
         settings = {
@@ -222,6 +225,20 @@ class SetUpTracking(QWidget):
         
         folder_path = self.folder_input.text()
         if folder_path:
+            # Check if folder is empty
+            if os.listdir(folder_path):  # Folder is not empty
+                reply = QMessageBox.question(
+                    self, 
+                    'Folder Not Empty', 
+                    "The selected folder is not empty. Do you want to overwrite the contents?",
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    return  # Do not proceed with saving
+                # If user clicks "Yes", proceed with the saving process
+
             # Define file paths
             settings_file_path = os.path.join(folder_path, 'settings.json')
             points_file_path = os.path.join(folder_path, 'points.npy')
