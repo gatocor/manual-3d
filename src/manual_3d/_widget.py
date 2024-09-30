@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from magicgui import magic_factory
 from magicgui.widgets import CheckBox, Container, create_widget
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox
+    QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox, QApplication, QWidget
 )
 from qtpy.QtCore import Qt
 import os
@@ -402,13 +402,296 @@ class LoadTracking(QWidget):
         self.viewer.add_tracks(trackings, name="Tracking Layer")
         print("Tracking layer (empty or not) loaded successfully.")
 
+class ManualTracking(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add napari viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Add checkbox for manual tracking activation/deactivation
+        self.manual_tracking_checkbox = QCheckBox("Enable Manual Tracking")
+        self.manual_tracking_checkbox.stateChanged.connect(self.toggle_manual_tracking)
+
+        # Add checkbox to the layout
+        self.layout.addWidget(self.manual_tracking_checkbox)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Store references to new layers added (for easy removal)
+        self.image_layer = self.viewer.layers['Data Layer']
+        self.points_layer = self.viewer.layers['Points Layer']
+        self.image_layer_aux = None
+        self.points_layer_aux = None
+
+        # To store the two points and directions
+        self.point1 = None
+        self.direction1 = None
+        self.point2 = None
+        self.direction2 = None
+        self.counter = 0
+        self.length = len(self.points_layer.data)
+
+    def toggle_manual_tracking(self, state):
+        """Toggle manual tracking based on checkbox state."""
+        if state == 2:  # Checkbox checked (state 2 means checked in PyQt)
+            self.activate_manual_tracking()
+            self.viewer.layers.selection.active = self.points_layer
+            self.points_layer.events.data.connect(self.on_point_added)
+            self.point1 = None
+            self.point2 = None
+            print("Point added callback enabled.")
+        else:  # Checkbox unchecked
+            self.deactivate_manual_tracking()
+            self.points_layer.events.data.disconnect(self.on_point_added)
+            self.point1 = None
+            self.point2 = None
+            print("Point added callback disabled.")
+
+    def activate_manual_tracking(self):
+        """Activate manual tracking by modifying layers."""
+        # Process image layer if available
+        self.process_image_layer_aux()
+
+        # Process points layer if available
+        self.process_points_layer_aux()
+
+    def process_image_layer_aux(self):
+        """Process the image layer by adding an initial time of zeros and removing the last image, using a memory-efficient view."""
+        # Check if 'Data Layer' exists in the viewer
+        if 'Data Layer' in self.viewer.layers:
+            original_image = self.viewer.layers['Data Layer'].data
+            original_scale = self.viewer.layers['Data Layer'].scale  # Get original scale
+
+            # Create a memory-efficient view by skipping the last frame of the original image
+            view_image = original_image[:-1]  # This is a view, not a copy
+
+            # Add an additional frame of zeros at the beginning without copying the entire array
+            zero_frame = np.zeros_like(view_image[0:1])  # Just one frame of zeros
+            new_image = np.concatenate((zero_frame, view_image), axis=0)  # Combine with view
+
+            # Add the new image layer with green color code, keeping the original scale
+            self.image_layer_aux = self.viewer.add_image(new_image, colormap='green', name="Manual Tracking Data Layer", opacity=0.5, scale=original_scale)
+            print("Manual tracking image layer added with memory-efficient views.")
+        else:
+            print("Data Layer not found in the viewer.")
+
+    def process_points_layer_aux(self):
+        """Process points layer by shifting time backward and applying green color and cross shape, using a memory-efficient view."""
+        # Check if 'Points Layer' exists in the viewer
+        if 'Points Layer' in self.viewer.layers:
+            original_points = self.viewer.layers['Points Layer'].data
+            original_scale = self.viewer.layers['Points Layer'].scale  # Get original scale
+
+            # Create a view of the original points data and shift the time points backward
+            modified_points = original_points.copy()
+            modified_points[:, 0] -= 1  # Assuming time is the first column
+
+            # Add the new points layer with green cross markers, keeping the original scale
+            self.points_layer_aux = self.viewer.add_points(modified_points, size=8, face_color='green', symbol='cross', name="Manual Tracking Points", scale=original_scale)
+            print("Manual tracking points layer added with memory-efficient view.")
+        else:
+            print("Points Layer not found in the viewer.")
+
+    def deactivate_manual_tracking(self):
+        """Deactivate manual tracking by removing added layers."""
+        # Remove the added image layer if it exists
+        try:
+            self.viewer.layers.remove(self.image_layer_aux)
+            print("Manual tracking image layer removed.")
+            self.image_layer_aux = None
+        except:
+            print("Manual tracking image layer was already removed.")
+            self.image_layer_aux = None
+
+        # Remove the added points layer if it exists
+        try:
+            self.viewer.layers.remove(self.points_layer_aux)
+            print("Manual tracking points layer removed.")
+            self.points_layer_aux = None
+        except:
+            print("Manual tracking points layer was already removed.")
+            self.points_layer_aux = None
+
+    def on_point_added(self, event):
+        """Callback triggered when a new point is added to the points layer."""
+
+        if self.counter == 0:
+            self.counter = 1
+            return
+        else:
+            self.counter = 0
+        
+        # Check if the points layer is empty before proceeding
+        if self.length > len(self.points_layer.data):
+            self.counter = 0
+            return
+        else:
+            self.length = len(self.points_layer.data)
+        
+        if len(self.points_layer.data) == 0:
+            print("Points layer is empty. No action taken.")
+            return
+
+        if self.viewer.dims.ndisplay != 3:
+            print("Not in 3D mode. No action taken.")
+            return
+        
+        print(self.viewer.dims.displayed)
+        if 0 in self.viewer.dims.displayed:
+            print("Not in (XYZ) perspective. Ignoring point.")
+            self.points_layer.data = self.points_layer.data[:-1]
+            return
+
+        # Get the added point (most recent point is the first one)
+        new_point = self.points_layer.data[-1]  # First point added to the layer
+
+        # If it's the first point, store it and its direction
+        if self.point1 is None:
+            self.point1 = new_point
+            self.direction1 = self.compute_camera_direction()  # Replace with your own logic to get direction
+            print(f"First point stored at: {self.point1}, direction: {self.direction1}")
+        elif self.point2 is None:
+            # If it's the second point, store it and calculate the closest point
+            self.point2 = new_point
+            self.direction2 = self.compute_camera_direction()  # Replace with your own logic to get direction
+            print(f"Second point stored at: {self.point2}, direction: {self.direction2}")
+
+            # Calculate the closest point between the two lines
+            closest_point = self.calculate_closest_point(self.point1[1:], self.direction1, self.point2[:1], self.direction2)
+            print(f"Closest point calculated at: {closest_point}")
+
+            # Remove the last two points (the first two added) and add the calculated closest point at the beginning
+            self.update_points_layer_with_closest_point(np.append([self.point1[0]],closest_point))
+
+            # Update vectors layer with the vectors from points and directions
+            # if self.vectorcheckbox.isChecked():
+            #     self.update_vectors_layer()
+
+            # Reset point storage for the next pair of points
+            self.point1 = None
+            self.point2 = None
+
+    def update_points_layer_with_closest_point(self, closest_point):
+        """
+        Update the points layer: Remove the first two points and add the calculated closest point to the beginning.
+        """
+        # Check if there are at least two points in the layer before removing
+        if len(self.points_layer.data) < 2:
+            print("Not enough points in the layer to remove two points.")
+            return
+
+        # Remove the first two points (most recently added)
+        self.points_layer.data = self.points_layer.data[:-2]
+
+        # Add the calculated closest point to the beginning of the layer
+        self.points_layer.data = np.vstack([self.points_layer.data, closest_point])
+
+        print(f"First two points removed and closest point {closest_point} appended.")
+
+    def make_vector_layer(self):
+        """Update the combo box with existing points layers."""
+        if "Debug" in self.viewer.layers:
+            if isinstance(self.viewer.layers["Debug"], napari.layers.Vectors):
+                del self.viewer.layers["Debug"]
+
+        # Add all existing Points layers to the combo box
+        self.vectors_layer = self.viewer.add_vectors(
+            np.zeros([0,2,3]), 
+            name='Debug_Vectors', 
+            length=100,
+            edge_width=2, 
+            edge_color='green')
+
+    def update_vectors_layer(self):
+        """Update or create a vectors layer to visualize the directions from the points."""
+        # Define the vector data format: [start_point, vector]
+        vectors_data = np.array([
+            [self.point1, self.direction1],
+            [self.point2, self.direction2]
+        ])
+        
+        self.vectors_layer.data = vectors_data
+        print("Vectors layer updated.")
+
+    def compute_camera_direction(self):
+        """
+        Compute the camera direction using the Euler angles and center of the camera.
+        Napari gives the camera's Euler angles in degrees and the center of rotation.
+        """
+
+        # Calculate the view direction based on the camera's current angles
+        view_direction = self.viewer.camera.calculate_nd_view_direction(3, (0,1,2))
+
+        return view_direction
+
+    def calculate_closest_point(self, P1, d1, P2, d2):
+        """
+        Finds the closest points on two skew (non-intersecting) lines in 3D.
+        
+        Parameters:
+        P1 : np.array
+            A point on line 1 (3D vector).
+        d1 : np.array
+            The direction vector of line 1 (3D vector).
+        P2 : np.array
+            A point on line 2 (3D vector).
+        d2 : np.array
+            The direction vector of line 2 (3D vector).
+            
+        Returns:
+        Q1 : np.array
+            Closest point on line 1 to line 2 (3D vector).
+        Q2 : np.array
+            Closest point on line 2 to line 1 (3D vector).
+        distance : float
+            The shortest distance between the two lines.
+        """
+        
+        # Convert input points and direction vectors to numpy arrays
+        P1 = np.array(P1)
+        d1 = np.array(d1)
+        P2 = np.array(P2)
+        d2 = np.array(d2)
+        
+        # Vector between the two points
+        P12 = P2 - P1
+        
+        # Cross product of the direction vectors
+        n = np.cross(d1, d2)
+        
+        # # If the cross product is zero, the lines are parallel
+        # if np.allclose(n, 0):
+        #     raise ValueError("The lines are parallel and do not have a unique closest pair of points.")
+        
+        # Coefficients for the system of equations
+        d1_dot_d1 = np.dot(d1, d1)
+        d2_dot_d2 = np.dot(d2, d2)
+        d1_dot_d2 = np.dot(d1, d2)
+        P12_dot_d1 = np.dot(P12, d1)
+        P12_dot_d2 = np.dot(P12, d2)
+        
+        # Solving for t1 and t2 using Cramer's rule
+        denominator = d1_dot_d1 * d2_dot_d2 - d1_dot_d2**2
+        t1 = (P12_dot_d1 * d2_dot_d2 - P12_dot_d2 * d1_dot_d2) / denominator
+        t2 = (P12_dot_d1 * d1_dot_d2 - P12_dot_d2 * d1_dot_d1) / denominator
+        
+        # Find the closest points on each line
+        Q1 = P1 + t1 * d1  # Closest point on line 1
+        Q2 = P2 + t2 * d2  # Closest point on line 2
+        
+        # Compute the shortest distance between the two lines
+        distance = np.linalg.norm(Q1 - Q2)
+        
+        return ( Q1 + Q2 ) /2
+
 # if we want even more control over our widget, we can use
 # magicgui `Container`
     
-from napari.utils.events import Event
-from napari import Viewer
-from qtpy.QtWidgets import QApplication, QWidget
-
 # class FindPeaks(Container):
 #     def __init__(self, viewer: "napari.viewer.Viewer"):
         
@@ -745,4 +1028,4 @@ class FindPeaks(QWidget):
 
 # Napari plugin function
 def napari_experimental_provide_dock_widget():
-    return SetUpTracking, LoadTracking
+    return SetUpTracking, LoadTracking, ManualTracking
