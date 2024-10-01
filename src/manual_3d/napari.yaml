@@ -30,10 +30,6 @@ contributions:
     - id: manual-3d.ManualTracking
       python_name: manual_3d:ManualTracking
       title: ManualTracking
-    # Find peaks
-    - id: manual-3d.widget_find_peaks
-      python_name: manual_3d:FindPeaks
-      title: FindPeaks
 
     # - id: manual-3d.make_container_widget
     #   python_name: manual_3d:ImageThreshold
@@ -75,9 +71,6 @@ contributions:
     # ManualTracking
     - command: manual-3d.ManualTracking
       display_name: ManualTracking
-    # Find peaks
-    - command: manual-3d.widget_find_peaks
-      display_name: FindPeaks
     # - command: manual-3d.make_container_widget
     #   display_name: Container Threshold
     # - command: manual-3d.make_magic_widget
