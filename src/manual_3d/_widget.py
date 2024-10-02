@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from magicgui import magic_factory
 from magicgui.widgets import CheckBox, Container, create_widget
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox, QApplication, QWidget
+    QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox, QApplication, QWidget, QDialog
 )
 from qtpy.QtCore import Qt
 import os
@@ -270,6 +270,227 @@ class SetUpTracking(QWidget):
         else:
             print("No folder selected for saving.")
 
+class SetUpTrackingDialog(QDialog):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.path_label = QLabel("Path to Data Folder:")
+        self.path_input = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.browse_folder)
+        self.layout.addWidget(self.path_label)
+        self.layout.addWidget(self.path_input)
+        self.layout.addWidget(self.browse_button)
+
+        # Start and end points
+        self.start_label = QLabel("Start Point:")
+        self.start_input = QSpinBox(self)
+        self.start_input.setMinimum(0)
+        self.start_input.setMaximum(999999)
+        self.end_label = QLabel("End Point:")
+        self.end_input = QSpinBox(self)
+        self.end_input.setMinimum(0)
+        self.end_input.setMaximum(999999)
+        self.layout.addWidget(self.start_label)
+        self.layout.addWidget(self.start_input)
+        self.layout.addWidget(self.end_label)
+        self.layout.addWidget(self.end_input)
+
+        # Format input
+        self.format_label = QLabel("Format:")
+        self.format_input = QLineEdit(self)
+        self.layout.addWidget(self.format_label)
+        self.layout.addWidget(self.format_input)
+
+        # Voxel sizes
+        self.voxel_x_label = QLabel("Voxel X:")
+        self.voxel_x_input = QDoubleSpinBox(self)
+        self.voxel_x_input.setDecimals(3)
+        self.voxel_x_input.setValue(0.347)
+        self.voxel_x_input.setSingleStep(0.001)
+        self.voxel_y_label = QLabel("Voxel Y:")
+        self.voxel_y_input = QDoubleSpinBox(self)
+        self.voxel_y_input.setDecimals(3)
+        self.voxel_y_input.setValue(0.347)
+        self.voxel_y_input.setSingleStep(0.001)
+        self.voxel_z_label = QLabel("Voxel Z:")
+        self.voxel_z_input = QDoubleSpinBox(self)
+        self.voxel_z_input.setDecimals(3)
+        self.voxel_z_input.setValue(2.0)
+        self.voxel_z_input.setSingleStep(0.001)
+        self.layout.addWidget(self.voxel_x_label)
+        self.layout.addWidget(self.voxel_x_input)
+        self.layout.addWidget(self.voxel_y_label)
+        self.layout.addWidget(self.voxel_y_input)
+        self.layout.addWidget(self.voxel_z_label)
+        self.layout.addWidget(self.voxel_z_input)
+
+        # Folder input for storing the JSON file
+        self.folder_label = QLabel("Path to where to save project:")
+        self.folder_input = QLineEdit(self)
+        self.browse_folder_button = QPushButton("Browse Folder")
+        self.browse_folder_button.clicked.connect(self.browse_json_folder)
+        self.layout.addWidget(self.folder_label)
+        self.layout.addWidget(self.folder_input)
+        self.layout.addWidget(self.browse_folder_button)
+
+        # Save button
+        self.save_button = QPushButton("Create tracking project")
+        self.save_button.clicked.connect(self.save_to_json)
+        self.layout.addWidget(self.save_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def browse_folder(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.path_input.setText(folder_path)
+            self.count_files_in_folder(folder_path)
+            self.detect_file_pattern(folder_path)
+
+    def browse_json_folder(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.folder_input.setText(folder_path)
+
+    def count_files_in_folder(self, folder_path):
+        """Count the number of files in the selected folder and set the start and end points."""
+        try:
+            file_list = os.listdir(folder_path)
+            self.file_count = len(file_list)
+        except Exception as e:
+            print(f"Error counting files: {e}")
+
+    def detect_file_pattern(self, folder_path):
+        """Detect the file naming pattern, start and end points, and suggest it as the format."""
+        try:
+            file_list = os.listdir(folder_path)
+            file_list = [f for f in file_list if os.path.isfile(os.path.join(folder_path, f))]
+            file_list.sort()  # Ensure the files are sorted correctly
+
+            if len(file_list) < 2:
+                return  # We need at least two files to detect a pattern
+
+            # Compare first and final filenames to identify the changing numeric pattern
+            file_1, file_2 = file_list[0], file_list[-1]
+            format_str = []
+            num_pattern = re.compile(r'\d+')  # Pattern to match numbers
+            numeric_values = []
+
+            i = 0
+            while i < len(file_1):
+                if i < len(file_2) and file_1[i] == file_2[i]:
+                    format_str.append(file_1[i])  # If characters are the same, add them to format
+                elif num_pattern.match(file_1[i:]):
+                    # Detect numeric sequence, determine its length
+                    num_match_1 = num_pattern.match(file_1[i:])
+                    num_match_2 = num_pattern.match(file_2[i:])
+                    
+                    if num_match_1 and num_match_2:
+                        length_1 = len(num_match_1.group(0))
+                        length_2 = len(num_match_2.group(0))
+                        if length_1 == length_2:  # Only replace if the lengths of numbers are the same
+                            format_str.append(f"{{:0{length_1}d}}")  # Use the correct number of digits
+                            # Collect the numeric values from all files to detect min/max
+                            for file_name in file_list:
+                                match = num_pattern.search(file_name)
+                                if match:
+                                    numeric_values.append(int(match.group(0)))
+                            i += length_1 - 1  # Skip past the numeric part
+                        else:
+                            format_str.append(file_1[i])
+                    else:
+                        format_str.append(file_1[i])
+                else:
+                    format_str.append(file_1[i])
+                i += 1
+
+            # Join format string and update the format input
+            detected_format = ''.join(format_str)
+            self.format_input.setText(detected_format)
+
+            # Set start and end points based on the detected numeric sequence
+            if numeric_values:
+                self.start_input.setValue(min(numeric_values))
+                self.end_input.setValue(max(numeric_values))
+
+        except Exception as e:
+            print(f"Error detecting file pattern: {e}")
+
+
+    def save_to_json(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+        settings = {
+            'path_data': self.path_input.text(),
+            'start_point': self.start_input.value(),
+            'end_point': self.end_input.value(),
+            'format_str': self.format_input.text(),
+            'voxel_x': self.voxel_x_input.value(),
+            'voxel_y': self.voxel_y_input.value(),
+            'voxel_z': self.voxel_z_input.value(),
+        }
+        
+        folder_path = self.folder_input.text()
+        if folder_path:
+            # Check if folder is empty
+            if os.listdir(folder_path):  # Folder is not empty
+                reply = QMessageBox.question(
+                    self, 
+                    'Folder Not Empty', 
+                    "The selected folder is not empty. Do you want to overwrite the contents?",
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    return  # Do not proceed with saving
+                # If user clicks "Yes", proceed with the saving process
+
+            # Define file paths
+            settings_file_path = os.path.join(folder_path, 'settings.json')
+            points_file_path = os.path.join(folder_path, 'points.npy')
+            points_id_file_path = os.path.join(folder_path, 'points_id.npy')
+            trackings_file_path = os.path.join(folder_path, 'trackings.npy')
+            
+            try:
+                # Save settings.json
+                with open(settings_file_path, 'w') as settings_file:
+                    json.dump(settings, settings_file, indent=4)
+
+                # Create empty points.npy (for storing points layers later)
+                points_array = np.empty((0, 4))  # Assuming points are in 3D, create an empty array
+                np.save(points_file_path, points_array)
+
+                # Create empty points.npy (for storing points layers later)
+                points_id_array = np.empty((0))  # Assuming points are in 3D, create an empty array
+                np.save(points_id_file_path, points_id_array)
+
+                # Create empty trackings.npy (for storing tracking layers later)
+                trackings_array = np.empty((0, 5))  # Assuming trackings are in 3D, create an empty array
+                np.save(trackings_file_path, trackings_array)
+
+                print(f"Settings saved to {settings_file_path}")
+                print(f"Empty points.npy and trackings.npy created in {folder_path}")
+            except Exception as e:
+                print(f"Error saving files: {e}")
+        else:
+            print("No folder selected for saving.")
+
+        self.accept()
+
 class LoadTracking(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
@@ -370,7 +591,7 @@ class LoadTracking(QWidget):
             )[0][:, :, 0, :, :]
             
             # Add the image layer to the viewer
-            self.viewer.add_image(image, scale=scale, name="Data Layer")
+            self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(folder_path)})
             print("Data layer loaded successfully.")
         except Exception as e:
             print(f"Error loading data layer: {e}")
@@ -391,7 +612,7 @@ class LoadTracking(QWidget):
                 print(f"Error loading points layer: {e}")
 
         # Add points layer to Napari viewer (even if empty)
-        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer")
+        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer", metadata={"path":str(folder_path)})
         print("Points layer (empty or not) loaded successfully.")
 
     def load_tracking_layer(self, folder_path, scale):
@@ -409,7 +630,151 @@ class LoadTracking(QWidget):
 
         # Add tracks layer to Napari viewer (even if empty)
         # self.viewer.add_tracks(trackings, scale=np.append([1,1],scale), name="Tracking Layer")
-        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale))
+        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)})
+        print("Tracking layer (empty or not) loaded successfully.")
+
+class LoadTrackingDialog(QDialog):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add napari viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Folder selection input
+        self.folder_label = QLabel("Select Project Folder:")
+        self.folder_input = QLineEdit(self)
+        self.browse_folder_button = QPushButton("Browse Folder")
+        self.browse_folder_button.clicked.connect(self.browse_folder)
+        self.layout.addWidget(self.folder_label)
+        self.layout.addWidget(self.folder_input)
+        self.layout.addWidget(self.browse_folder_button)
+
+        # Layer checkboxes (default all checked)
+        self.data_checkbox = QCheckBox("Data")
+        self.data_checkbox.setChecked(True)
+        self.layout.addWidget(self.data_checkbox)
+
+        self.points_checkbox = QCheckBox("Points")
+        self.points_checkbox.setChecked(True)
+        self.layout.addWidget(self.points_checkbox)
+
+        self.tracking_checkbox = QCheckBox("Tracking")
+        self.tracking_checkbox.setChecked(True)
+        self.layout.addWidget(self.tracking_checkbox)
+
+        # Load button
+        self.load_button = QPushButton("Load Layers")
+        self.load_button.clicked.connect(self.load_layers)
+        self.layout.addWidget(self.load_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def browse_folder(self):
+        """Open a file dialog to browse for the project folder."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        if folder_path:
+            self.folder_input.setText(folder_path)
+
+    def load_layers(self):
+        """Load the selected layers based on user input."""
+        folder_path = self.folder_input.text()
+
+        # Ensure the folder path is valid
+        if not os.path.exists(folder_path):
+            print("Invalid folder path.")
+            return
+
+        # Load settings from settings.json
+        settings_file = os.path.join(folder_path, "settings.json")
+        if not os.path.exists(settings_file):
+            print("settings.json not found.")
+            return
+
+        try:
+            with open(settings_file, 'r') as f:
+                settings = json.load(f)
+        except Exception as e:
+            print(f"Error loading settings.json: {e}")
+            return
+
+        voxel_x = settings.get('voxel_x', 1.0)
+        voxel_y = settings.get('voxel_y', 1.0)
+        voxel_z = settings.get('voxel_z', 1.0)
+        scale = [voxel_z, voxel_y, voxel_x]
+
+        # Load the selected layers
+        if self.data_checkbox.isChecked():
+            self.load_data_layer(folder_path, settings, scale)
+
+        if self.points_checkbox.isChecked():
+            self.load_points_layer(folder_path, scale)
+
+        if self.tracking_checkbox.isChecked():
+            self.load_tracking_layer(folder_path, scale)
+
+        self.accept()
+
+    def load_data_layer(self, folder_path, settings, scale):
+        """Load the data layer from the project folder."""
+        try:
+            # Assuming read_split_times is defined elsewhere
+            path_data = settings['path_data']
+            start_point = settings['start_point']
+            end_point = settings['end_point']
+            format_str = settings['format_str']
+            
+            # Load the movie/data layer
+            image = read_split_times(
+                str(path_data),
+                range(start_point, end_point + 1),
+                format_str
+            )[0][:, :, 0, :, :]
+            
+            # Add the image layer to the viewer
+            self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(folder_path)})
+            print("Data layer loaded successfully.")
+        except Exception as e:
+            print(f"Error loading data layer: {e}")
+
+    def load_points_layer(self, folder_path, scale):
+        """Load the points layer from points.npy, even if it's empty."""
+        points_file = os.path.join(folder_path, "points.npy")
+        points = np.empty((0, 4))  # Default empty points array in 3D
+
+        points_id_file = os.path.join(folder_path, "points_id.npy")
+        points_id = np.empty((0))  # Default empty points array in 3D
+
+        if os.path.exists(points_file):
+            try:
+                points = np.load(points_file)
+                points_id = np.load(points_id_file)
+            except Exception as e:
+                print(f"Error loading points layer: {e}")
+
+        # Add points layer to Napari viewer (even if empty)
+        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer", metadata={"path":str(folder_path)})
+        print("Points layer (empty or not) loaded successfully.")
+
+    def load_tracking_layer(self, folder_path, scale):
+        """Load the tracking layer from trackings.npy, even if it's empty."""
+        tracking_file = os.path.join(folder_path, "trackings.npy")
+
+        if os.path.exists(tracking_file):
+            try:
+                trackings = np.load(tracking_file)
+            except Exception as e:
+                print(f"Error loading tracking layer: {e}")
+
+        if len(trackings) == 0:
+            trackings = np.zeros((1, 5))  # Default empty tracks array
+
+        # Add tracks layer to Napari viewer (even if empty)
+        # self.viewer.add_tracks(trackings, scale=np.append([1,1],scale), name="Tracking Layer")
+        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)})
         print("Tracking layer (empty or not) loaded successfully.")
 
 class ManualTracking(QWidget):
@@ -418,6 +783,28 @@ class ManualTracking(QWidget):
 
         # Add napari viewer
         self.viewer = napari_viewer
+
+        while 'Data Layer' not in napari_viewer.layers or \
+            'Points Layer' not in napari_viewer.layers or \
+            'Tracking Layer' not in napari_viewer.layers:
+
+            msg = QMessageBox()
+            msg.setWindowTitle("Layers missing")
+            msg.setText("Files from a tracking project seems to be missing.")
+            msg.setIcon(QMessageBox.Question)
+
+            # Add more than two buttons
+            button_create = msg.addButton("Create one", QMessageBox.ActionRole)
+            button_load = msg.addButton("Load one", QMessageBox.ActionRole)
+
+            msg.exec_()
+
+            if msg.clickedButton() == button_create:
+                load_tracking_dialog = SetUpTrackingDialog(napari_viewer)
+                load_tracking_dialog.exec_()
+            elif msg.clickedButton() == button_load:
+                load_tracking_dialog = LoadTrackingDialog(napari_viewer)
+                load_tracking_dialog.exec_()
 
         # Create the layout
         self.layout = QVBoxLayout()
@@ -483,6 +870,9 @@ class ManualTracking(QWidget):
         # self.vectorcheckbox = QCheckBox("Debug")
         # self.layout.addWidget(self.vectorcheckbox)
         # self.vectorcheckbox.stateChanged.connect(self.make_vector_layer)
+        self.save_button = QPushButton("Save")
+        self.layout.addWidget(self.save_button)
+        self.save_button.clicked.connect(self.save)
 
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
@@ -984,6 +1374,17 @@ class ManualTracking(QWidget):
         distance = np.linalg.norm(Q1 - Q2)
         
         return ( Q1 + Q2 ) /2 / scale
+
+    def save(self):
+
+        # Create empty points.npy (for storing points layers later)
+        np.save(f"{self.points_layer.metadata['path']}/points.npy", self.points_layer.data)
+
+        # Create empty points.npy (for storing points layers later)
+        np.save(f"{self.points_layer.metadata['path']}/points_id.npy", self.points_layer.properties["id"])
+
+        # Create empty trackings.npy (for storing tracking layers later)
+        np.save(f"{self.tracking_layer.metadata['path']}/trackings.npy", self.tracking_layer.data)
 
 # Napari plugin function
 def napari_experimental_provide_dock_widget():
