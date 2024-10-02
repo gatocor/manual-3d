@@ -243,6 +243,7 @@ class SetUpTracking(QWidget):
             # Define file paths
             settings_file_path = os.path.join(folder_path, 'settings.json')
             points_file_path = os.path.join(folder_path, 'points.npy')
+            points_id_file_path = os.path.join(folder_path, 'points_id.npy')
             trackings_file_path = os.path.join(folder_path, 'trackings.npy')
             
             try:
@@ -253,6 +254,10 @@ class SetUpTracking(QWidget):
                 # Create empty points.npy (for storing points layers later)
                 points_array = np.empty((0, 4))  # Assuming points are in 3D, create an empty array
                 np.save(points_file_path, points_array)
+
+                # Create empty points.npy (for storing points layers later)
+                points_id_array = np.empty((0))  # Assuming points are in 3D, create an empty array
+                np.save(points_id_file_path, points_id_array)
 
                 # Create empty trackings.npy (for storing tracking layers later)
                 trackings_array = np.empty((0, 5))  # Assuming trackings are in 3D, create an empty array
@@ -375,14 +380,18 @@ class LoadTracking(QWidget):
         points_file = os.path.join(folder_path, "points.npy")
         points = np.empty((0, 4))  # Default empty points array in 3D
 
+        points_id_file = os.path.join(folder_path, "points_id.npy")
+        points_id = np.empty((0))  # Default empty points array in 3D
+
         if os.path.exists(points_file):
             try:
                 points = np.load(points_file)
+                points_id = np.load(points_id_file)
             except Exception as e:
                 print(f"Error loading points layer: {e}")
 
         # Add points layer to Napari viewer (even if empty)
-        self.viewer.add_points(points, scale=np.append([1],scale), name="Points Layer")
+        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer")
         print("Points layer (empty or not) loaded successfully.")
 
     def load_tracking_layer(self, folder_path, scale):
@@ -446,10 +455,11 @@ class ManualTracking(QWidget):
         #Track
         self.tracking_active = False
         self.tracking_active_id = 0
+        self.tracking_time = 0
         if np.all(self.tracking_layer.data == 0):
             self.tracking_max_id = 0
         else:
-            self.tracking_max_id = np.max(self.viewer.layers['Tracking Layer'].data,axis=1)[0]
+            self.tracking_max_id = np.max(self.viewer.layers['Tracking Layer'].data,axis=0)[0]
         self.start_tracking_button = QPushButton("Start Tracking")
         self.layout.addWidget(self.start_tracking_button)
         self.start_tracking_button.clicked.connect(self.new_tracking)
@@ -466,6 +476,8 @@ class ManualTracking(QWidget):
         self.debugging = QCheckBox("Debugging")
         self.debugging.setChecked(False)
         self.layout.addWidget(self.debugging)
+
+        self.viewer.layers.selection.active = self.viewer.layers['Points Layer']
 
         # #Debug
         # self.vectorcheckbox = QCheckBox("Debug")
@@ -532,60 +544,128 @@ class ManualTracking(QWidget):
 
         if not self.click_3D.isChecked():
             return
-
-        if self.viewer.dims.ndisplay != 3:
-            if self.debugging.isChecked():
-                print("Not in 3D mode. No action taken.")
-            return
         
         if 0 in self.viewer.dims.displayed:
             if self.debugging.isChecked():
                 print("Not in (XYZ) perspective. Ignoring point addition.")
-            self.prevent_update = True
-            self.points_layer.data = self.points_layer.data[:-1]
-            self.prevent_update = False
+            self.removePoint(self.points_layer)
             return
 
+        if self.tracking_active:
+            if self.tracking_time+1 != self.get_time():    
+                reply = QMessageBox.question(
+                    self, 
+                    'Trajectory causality broken', 
+                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changes the time. Do you want to continue tracking?",
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+
+                    self.remove_point(self.points_layer)
+                    self.stop_tracking()
+
+                    return
+                
+                elif reply == QMessageBox.Yes:
+
+                    self.remove_point(self.points_layer)
+                    self.viewer.dims.current_step[0] = self.tracking_time+1
+
+                    return
+
         # Get the added point (most recent point is the first one)
-        new_point = self.points_layer.data[-1]  # First point added to the layer
+        new_point = self.points_layer.data[-1].copy()  # First point added to the layer
 
-        # If it's the first point, store it and its direction
-        if self.point1 is None:
-            self.point1 = new_point
-            self.direction1 = self.compute_camera_direction()  # Replace with your own logic to get direction
-            if self.debugging.isChecked():
-                print(f"First point stored at: {self.point1}, direction: {self.direction1}")
-        elif self.point2 is None:
-
-            # If it's the second point, store it and calculate the closest point
-            self.point2 = new_point
-            self.direction2 = self.compute_camera_direction()  # Replace with your own logic to get direction
-            if self.debugging.isChecked():
-                print(f"Second point stored at: {self.point2}, direction: {self.direction2}")
-
-            # Calculate the closest point between the two lines
-            closest_point = self.calculate_closest_point(self.point1[1:], self.direction1, self.point2[1:], self.direction2)
-            if self.debugging.isChecked():
-                print(f"Closest point calculated at: {closest_point}")
-
-            # Remove the last two points (the first two added) and add the calculated closest point at the beginning
-            self.update_points_layer_with_closest_point(np.append([self.point1[0]],closest_point))
+        if self.viewer.dims.ndisplay == 2:
 
             # Add tracking
-            self.update_tracks_layer_with_new_point(np.append([self.point1[0]],closest_point))
+            self.add_point_properties(self.points_layer)
+            self.update_tracks_layer_with_new_point(new_point)
+            new_point[0] += 1
+            if new_point[0] < self.length:
+                self.add_point(self.points_layer_aux, new_point)
 
-            # # Update vectors layer with the vectors from points and directions
-            # if self.vectorcheckbox.isChecked():
-            #     self.update_vectors_layer()
+            self.jump_next()
 
-            # Next step
-            if self.jump_next_checkBox:
-                current_time = self.viewer.dims.current_step[0]
-                self.viewer.dims.set_current_step(0, current_time + 1)
+        elif self.viewer.dims.ndisplay == 3:
 
-            # Reset point storage for the next pair of points
-            self.point1 = None
-            self.point2 = None
+            # If it's the first point, store it and its direction
+            if self.point1 is None:
+                self.point1 = new_point
+                self.direction1 = self.compute_camera_direction()  # Replace with your own logic to get direction
+                if self.debugging.isChecked():
+                    print(f"First point stored at: {self.point1}, direction: {self.direction1}")
+
+                return
+            
+            elif self.point2 is None:
+
+                # If it's the second point, store it and calculate the closest point
+                self.point2 = new_point
+                self.direction2 = self.compute_camera_direction()  # Replace with your own logic to get direction
+                if self.debugging.isChecked():
+                    print(f"Second point stored at: {self.point2}, direction: {self.direction2}")
+
+                # Calculate the closest point between the two lines
+                closest_point = self.calculate_closest_point(self.point1[1:], self.direction1, self.point2[1:], self.direction2)
+                if self.debugging.isChecked():
+                    print(f"Closest point calculated at: {closest_point}")
+
+                # Remove the last two points (the first two added) and add the calculated closest point at the beginning
+                self.update_points_layer_with_closest_point(np.append([self.point1[0]],closest_point))
+
+                # Add tracking
+                self.update_tracks_layer_with_new_point(np.append([self.point1[0]],closest_point))
+
+                # # Update vectors layer with the vectors from points and directions
+                # if self.vectorcheckbox.isChecked():
+                #     self.update_vectors_layer()
+
+                # Reset point storage for the next pair of points
+                self.point1 = None
+                self.point2 = None
+
+                self.jump_next()
+
+    def get_time(self):
+        return self.viewer.dims.current_step[0]
+
+    def remove_point(self, points_layer, pos=-1):
+
+        self.prevent_update = True
+        points_layer.data = points_layer.data[:pos]
+        if "id" in points_layer.properties.keys():
+            points_layer.properties["id"] = points_layer.properties["id"][:pos]
+        self.prevent_update = False
+
+        return
+
+    def add_point(self, points_layer, point):
+
+        self.prevent_update = True
+        points_layer.data = np.vstack([points_layer.data, point])
+        if "id" in points_layer.properties.keys():
+            points_layer.properties["id"] = np.append(points_layer.properties["id"],[self.tracking_active_id])
+        self.prevent_update = False
+
+        return
+
+    def add_point_properties(self, points_layer):
+
+        if "id" in points_layer.properties.keys():
+            points_layer.properties["id"][-1] = self.tracking_active_id
+
+        return
+
+    def jump_next(self):
+        # Next step
+        if self.jump_next_checkBox:
+            current_time = self.get_time()
+            self.viewer.dims.set_current_step(0, current_time + 1)
+
+        return
 
     def update_points_layer_with_closest_point(self, closest_point):
         """
@@ -598,15 +678,13 @@ class ManualTracking(QWidget):
             return
 
         # Remove the first two points (most recently added)
-        self.prevent_update = True
-        self.points_layer.data = self.points_layer.data[:-2]
+        self.remove_point(self.points_layer,pos=-2)
         # Add the calculated closest point to the beginning of the layer
-        self.points_layer.data = np.vstack([self.points_layer.data, closest_point])
-        self.prevent_update = False
+        self.add_point(self.points_layer, closest_point)
 
         closest_point[0] += 1
         if closest_point[0] < self.length:
-            self.points_layer_aux.data = np.vstack([self.points_layer_aux.data, closest_point])
+            self.add_point(self.points_layer_aux, closest_point)
 
         if self.debugging.isChecked():
             print(f"First two points removed and closest point {closest_point} appended.")
@@ -616,37 +694,132 @@ class ManualTracking(QWidget):
         Create a new tracking id and activate the tracking.
         """
 
-        self.tracking_max_id += 1
-        self.tracking_active_id = self.tracking_max_id
+        if self.tracking_active:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Stop tracking")
+                msg.setText("There is an active tracking. Do you want to stop it?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+                    self.stop_tracking()
+                elif msg.clickedButton() == button_no:
+                    return
+
+        if len(self.points_layer.selected_data) == 1:
+
+            selected_time = self.points_layer.data[self.points_layer.selected_point[0]][0]
+            selected_id = self.points_layer.properties["id"][self.points_layer.selected_point[0]]
+
+            self.viewer.dims.current_step[0] = self.selected_time
+
+            if selected_id == np.nan:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from selected")
+                msg.setText("There is a point selected without id. Do you want to start a tracking from this point?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    self.setup_active_tracking(self, id=None, tracking_time=selected_time)
+
+                elif msg.clickedButton() == button_no:
+
+                    print("Option 2 selected")
+
+            keep = self.tracking_layer.data[:,0] == selected_id
+            times = np.sort(self.tracking_layer.data[keep,1])
+
+            if np.any(times > selected_time):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from inner selected point")
+                msg.setText(f"There is a point selected with tracking id {selected_id}. This point selected is in the middle of an existing track. What do you want to do?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_division = msg.addButton("Start division", QMessageBox.ActionRole)
+                button2 = msg.addButton("Keep", QMessageBox.ActionRole)
+                button3 = msg.addButton("Option 3", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button1:
+                    print("Option 1 selected")
+                elif msg.clickedButton() == button2:
+                    print("Option 2 selected")
+                elif msg.clickedButton() == button3:
+                    print("Option 3 selected")
+
+        elif self.length > self.get_time()+1:
+        
+            self.setup_active_tracking()
+
+        else:
+                print("We are in the final time point, we cannot start a track here.")
+
+        return
+    
+    def setup_active_tracking(self, id=None, tracking_time=None):
+
+        if id == None:
+            self.tracking_max_id += 1
+            self.tracking_active_id = self.tracking_max_id
+        else:
+            self.tracking_active_id = id
+
         self.tracking_active = True
+
+        if tracking_time == None:
+            self.tracking_time = self.get_time()-1
+        else:
+            self.tracking_time = tracking_time
 
         self.start_tracking_button.setStyleSheet(
                     "QPushButton {"
                         "background-color: green;"  # Green background
                     "}"
                 )
-
-
+        
         return
-    
+
     def stop_tracking(self):
         """
         Stop tracking.
         """
 
         self.tracking_active = False
+        self.tracking_active_id = np.nan
 
         self.start_tracking_button.setStyleSheet("")
 
         return
 
-    def update_tracks_layer_with_new_point(self, closest_point):
+    def update_tracks_layer_with_new_point(self, point):
         """
         Update the tracking layer.
         """
         if self.tracking_active:
-            track_point = np.append([self.tracking_active_id],closest_point)
+            track_point = np.append([self.tracking_active_id], point)
             self.tracking_layer.data = np.vstack([self.tracking_layer.data, track_point])
+
+            if self.length <= self.get_time()+1:
+                self.stop_tracking()
+
+            self.tracking_time = self.get_time()
 
         return
 
