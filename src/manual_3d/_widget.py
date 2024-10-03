@@ -337,45 +337,52 @@ class BaseSetUp(QWidget):
             if len(file_list) < 2:
                 return  # We need at least two files to detect a pattern
 
-            # Compare first and final filenames to identify the changing numeric pattern
-            file_1, file_2 = file_list[0], file_list[-1]
-            format_str = []
-            num_pattern = re.compile(r'\d+')  # Pattern to match numbers
+            # Prepare to capture numeric patterns and invalid files
+            num_pattern = re.compile(r'\d+')
+            valid_files = []
             numeric_values = []
+            format_str = None
 
+            for file_name in file_list:
+                match = num_pattern.search(file_name)
+                if match:
+                    valid_files.append(file_name)
+                    numeric_values.append(int(match.group(0)))
+                else:
+                    print(f"File {file_name} does not follow the numeric pattern and will be skipped.")
+
+            if len(valid_files) < 2:
+                print("Not enough valid files to detect a pattern.")
+                return
+
+            # Compare first and last valid filenames
+            file_1, file_2 = valid_files[0], valid_files[-1]
+            format_str_parts = []
             i = 0
+
             while i < len(file_1):
                 if i < len(file_2) and file_1[i] == file_2[i]:
-                    format_str.append(file_1[i])  # If characters are the same, add them to format
+                    format_str_parts.append(file_1[i])
                 elif num_pattern.match(file_1[i:]):
-                    # Detect numeric sequence, determine its length
                     num_match_1 = num_pattern.match(file_1[i:])
                     num_match_2 = num_pattern.match(file_2[i:])
-                    
                     if num_match_1 and num_match_2:
                         length_1 = len(num_match_1.group(0))
                         length_2 = len(num_match_2.group(0))
-                        if length_1 == length_2:  # Only replace if the lengths of numbers are the same
-                            format_str.append(f"{{:0{length_1}d}}")  # Use the correct number of digits
-                            # Collect the numeric values from all files to detect min/max
-                            for file_name in file_list:
-                                match = num_pattern.search(file_name)
-                                if match:
-                                    numeric_values.append(int(match.group(0)))
-                            i += length_1 - 1  # Skip past the numeric part
+                        if length_1 == length_2:
+                            format_str_parts.append(f"{{:0{length_1}d}}")
+                            i += length_1 - 1  # Skip the numeric section
                         else:
-                            format_str.append(file_1[i])
-                    else:
-                        format_str.append(file_1[i])
+                            format_str_parts.append(file_1[i])
                 else:
-                    format_str.append(file_1[i])
+                    format_str_parts.append(file_1[i])
                 i += 1
 
             # Join format string and update the format input
-            detected_format = ''.join(format_str)
-            self.format_input.setText(detected_format)
+            format_str = ''.join(format_str_parts)
+            self.format_input.setText(format_str)
 
-            # Set start and end points based on the detected numeric sequence
+            # Set start and end points based on detected numeric sequence
             if numeric_values:
                 self.start_input.setValue(min(numeric_values))
                 self.end_input.setValue(max(numeric_values))
