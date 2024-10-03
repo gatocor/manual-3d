@@ -840,6 +840,7 @@ class ManualTracking(QWidget):
         self.prevent_update = False
 
         #Track
+        self.tracking_forward = True
         self.tracking_active = False
         self.tracking_active_id = np.nan
         self.tracking_time = 0
@@ -942,11 +943,11 @@ class ManualTracking(QWidget):
             return
 
         if self.tracking_active:
-            if self.tracking_time+1 != self.get_time():    
+            if self.tracking_time+1 != self.get_time() and self.tracking_forward:    
                 reply = QMessageBox.question(
                     self, 
-                    'Trajectory causality broken', 
-                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changes the time. Do you want to continue tracking?",
+                    'Forward trajectory causality broken', 
+                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
                     QMessageBox.Yes | QMessageBox.No, 
                     QMessageBox.No
                 )
@@ -962,6 +963,29 @@ class ManualTracking(QWidget):
 
                     self.remove_point(self.points_layer)
                     self.viewer.dims.current_step = (self.tracking_time+1, *self.viewer.dims.current_step[1:])
+
+                    return
+
+            elif self.tracking_time-1 != self.get_time() and self.tracking_forward:    
+                reply = QMessageBox.question(
+                    self, 
+                    'Backward trajectory causality broken', 
+                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+
+                    self.remove_point(self.points_layer)
+                    self.stop_tracking()
+
+                    return
+                
+                elif reply == QMessageBox.Yes:
+
+                    self.remove_point(self.points_layer)
+                    self.viewer.dims.current_step = (self.tracking_time-1, *self.viewer.dims.current_step[1:])
 
                     return
 
@@ -1053,7 +1077,10 @@ class ManualTracking(QWidget):
         # Next step
         if self.jump_next_checkBox:
             current_time = self.get_time()
-            self.viewer.dims.set_current_step(0, current_time + 1)
+            if self.tracking_forward:
+                self.viewer.dims.set_current_step(0, current_time + 1)
+            else:
+                self.viewer.dims.set_current_step(0, current_time - 1)
 
         return
 
@@ -1079,6 +1106,24 @@ class ManualTracking(QWidget):
         if self.debugging.isChecked():
             print(f"First two points removed and closest point {closest_point} appended.")
 
+    def question_tracking_direction(self):
+
+        msg = QMessageBox()
+        msg.setWindowTitle("Tracking movement")
+        msg.setText("Do you want the tracking to move forwards or backwards?")
+        msg.setIcon(QMessageBox.Question)
+
+        # Add more than two buttons
+        button_forward = msg.addButton("Forwards", QMessageBox.ActionRole)
+        button_backward = msg.addButton("Backwards", QMessageBox.ActionRole)
+
+        msg.exec_()
+
+        if msg.clickedButton() == button_forward:
+            self.tracking_forward = True
+        elif msg.clickedButton() == button_backward:
+            self.tracking_forward = False
+
     def new_tracking(self):
         """
         Create a new tracking id and activate the tracking.
@@ -1088,7 +1133,7 @@ class ManualTracking(QWidget):
 
                 msg = QMessageBox()
                 msg.setWindowTitle("Stop tracking")
-                msg.setText("There is an active tracking. Do you want to stop it?")
+                msg.setText("There is an already active tracking. Do you want to stop it and start a new tracking?")
                 msg.setIcon(QMessageBox.Question)
 
                 # Add more than two buttons
@@ -1126,6 +1171,8 @@ class ManualTracking(QWidget):
 
                 if msg.clickedButton() == button_yes:
 
+                    self.question_tracking_direction()
+
                     self.setup_active_tracking(id=None, tracking_time=selected_time)
                     self.update_tracks_layer_with_new_point(selected_point)
                     self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
@@ -1154,6 +1201,7 @@ class ManualTracking(QWidget):
                 if msg.clickedButton() == button_yes:
 
                     #Relabel future branch
+                    self.tracking_forward = True
                     self.setup_active_tracking()
                     keep_ids = self.tracking_layer.data[:,0] == selected_id
                     keep_times = self.tracking_layer.data[:,1] > selected_time
@@ -1224,7 +1272,10 @@ class ManualTracking(QWidget):
         self.tracking_active = True
 
         if tracking_time == None:
-            self.tracking_time = self.get_time()-1
+            if self.tracking_forward:
+                self.tracking_time = self.get_time()-1
+            else:
+                self.tracking_time = self.get_time()+1
         else:
             self.tracking_time = tracking_time
 
@@ -1256,11 +1307,13 @@ class ManualTracking(QWidget):
             track_point = np.append([self.tracking_active_id], point)
             self.tracking_layer.data = np.vstack([self.tracking_layer.data, track_point])
 
-            if self.length <= self.get_time()+1:
+            if self.length <= self.get_time()+1 and self.tracking_forward:
+
+                self.stop_tracking()
 
                 msg = QMessageBox()
-                msg.setWindowTitle("Final time point")
-                msg.setText("You are in the last time point. The track has stopped.")
+                msg.setWindowTitle("Final time point reached")
+                msg.setText("You are in the last time point when tracking forward. The track has stopped.")
                 msg.setIcon(QMessageBox.Warning)
 
                 # Add more than two buttons
@@ -1268,8 +1321,19 @@ class ManualTracking(QWidget):
 
                 msg.exec_()
 
+            elif 0 >= self.get_time()-1 and self.tracking_forward:
 
                 self.stop_tracking()
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Initial time point reached")
+                msg.setText("You are in the first time point when tracking backwards. The track has stopped.")
+                msg.setIcon(QMessageBox.Warning)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                msg.exec_()
 
             self.tracking_time = self.get_time()
 
