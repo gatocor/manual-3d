@@ -18,6 +18,14 @@ contributions:
     - id: manual-3d.make_sample_data
       python_name: manual_3d._sample_data:make_sample_data
       title: Load sample data from manual-3d
+    # Box
+    - id: manual-3d.Box
+      python_name: manual_3d:Box
+      title: Box
+    # Parabola
+    - id: manual-3d.Parabola
+      python_name: manual_3d:Parabola
+      title: Parabola
     # SetUpTracking
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
@@ -62,6 +70,12 @@ contributions:
       display_name: manual-3d
       key: unique_id.1
   widgets:
+    # Box
+    - command: manual-3d.Box
+      display_name: Box
+    # Parabola
+    - command: manual-3d.Parabola
+      display_name: Parabola
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking

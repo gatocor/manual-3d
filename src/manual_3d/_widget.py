@@ -51,6 +51,175 @@ import inspect
 if TYPE_CHECKING:
     import napari
 
+class Load(QWidget):
+
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+class Parabola(QWidget):
+
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        self.Z_label = QLabel("Z:")
+        self.Z_input = QDoubleSpinBox(self)
+        self.Z_input.setMinimum(0)
+        self.Z_input.setMaximum(999999)
+        self.Z_input.setValue(110)
+        self.layout.addWidget(self.Z_label)
+        self.layout.addWidget(self.Z_input)
+
+        self.Y_label = QLabel("Y:")
+        self.Y_input = QDoubleSpinBox(self)
+        self.Y_input.setMinimum(0)
+        self.Y_input.setMaximum(999999)
+        self.Y_input.setValue(1100)
+        self.layout.addWidget(self.Y_label)
+        self.layout.addWidget(self.Y_input)
+
+        self.X_label = QLabel("X:")
+        self.X_input = QDoubleSpinBox(self)
+        self.X_input.setMinimum(0)
+        self.X_input.setMaximum(999999)
+        self.X_input.setValue(1200)
+        self.layout.addWidget(self.X_label)
+        self.layout.addWidget(self.X_input)
+
+        self.R_label = QLabel("R:")
+        self.R_input = QDoubleSpinBox(self)
+        self.R_input.setMinimum(0)
+        self.R_input.setMaximum(999999)
+        self.R_input.setValue(110)
+        self.layout.addWidget(self.R_label)
+        self.layout.addWidget(self.R_input)
+
+        self.browse_button = QPushButton("Make Parabola")
+        self.layout.addWidget(self.browse_button)
+        self.browse_button.clicked.connect(self.compute)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def compute(self):
+
+        X,Y = np.meshgrid(np.arange(0,10000,10),np.arange(0,10000,10))
+        X = X.flatten()
+        Y = Y.flatten()
+        Z = -((X-self.X_input.value())/self.R_input.value())**2-((Y-self.Y_input.value())/self.R_input.value())**2+self.Z_input.value()
+
+        parabola = np.array([Z,Y,X]).transpose()
+
+        if "Parabola" in self.viewer.layers:
+            self.viewer.layers["Parabola"].data = parabola
+        else:
+            self.viewer.add_points(parabola, scale=(2,0.347,0.347), blending="translucent_no_depth", opacity=0.1, name="Parabola")
+
+class Box(QWidget):
+
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        self.Zmin_label = QLabel("Zmin:")
+        self.Zmin_input = QDoubleSpinBox(self)
+        self.Zmin_input.setMinimum(0)
+        self.Zmin_input.setMaximum(999999)
+        self.Zmin_input.setValue(0)
+        self.layout.addWidget(self.Zmin_label)
+        self.layout.addWidget(self.Zmin_input)
+
+        self.Zmax_label = QLabel("Zmax:")
+        self.Zmax_input = QDoubleSpinBox(self)
+        self.Zmax_input.setMinimum(0)
+        self.Zmax_input.setMaximum(999999)
+        self.Zmax_input.setValue(300)
+        self.layout.addWidget(self.Zmax_label)
+        self.layout.addWidget(self.Zmax_input)
+
+        self.Ymin_label = QLabel("Ymin:")
+        self.Ymin_input = QDoubleSpinBox(self)
+        self.Ymin_input.setMinimum(0)
+        self.Ymin_input.setMaximum(999999)
+        self.Ymin_input.setValue(0)
+        self.layout.addWidget(self.Ymin_label)
+        self.layout.addWidget(self.Ymin_input)
+
+        self.Ymax_label = QLabel("Ymax:")
+        self.Ymax_input = QDoubleSpinBox(self)
+        self.Ymax_input.setMinimum(0)
+        self.Ymax_input.setMaximum(999999)
+        self.Ymax_input.setValue(2300)
+        self.layout.addWidget(self.Ymax_label)
+        self.layout.addWidget(self.Ymax_input)
+
+        self.Xmin_label = QLabel("Xmin:")
+        self.Xmin_input = QDoubleSpinBox(self)
+        self.Xmin_input.setMinimum(0)
+        self.Xmin_input.setMaximum(999999)
+        self.Xmin_input.setValue(0)
+        self.layout.addWidget(self.Xmin_label)
+        self.layout.addWidget(self.Xmin_input)
+
+        self.Xmax_label = QLabel("Xmax:")
+        self.Xmax_input = QDoubleSpinBox(self)
+        self.Xmax_input.setMinimum(0)
+        self.Xmax_input.setMaximum(999999)
+        self.Xmax_input.setValue(2300)
+        self.layout.addWidget(self.Xmax_label)
+        self.layout.addWidget(self.Xmax_input)
+
+        self.browse_button = QPushButton("Make Box")
+        self.layout.addWidget(self.browse_button)
+        self.browse_button.clicked.connect(self.compute)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def compute(self):
+
+        X,Y = np.meshgrid(np.arange(self.Xmin_input.value(),self.Xmax_input.value(),10),np.arange(self.Ymin_input.value(),self.Ymax_input.value(),10))
+        X = X.flatten()
+        Y = Y.flatten()
+        Z = np.zeros_like(X)
+        cube = np.array([Z + self.Zmin_input.value(),Y,X]).transpose()
+        cube = np.append(cube,np.array([Z + self.Zmax_input.value(),Y,X]).transpose(),axis=0)
+
+        X,Z = np.meshgrid(np.arange(self.Xmin_input.value(),self.Xmax_input.value(),10),np.arange(self.Zmin_input.value(),self.Zmax_input.value(),10))
+        X = X.flatten()
+        Z = Z.flatten()
+        Y = np.zeros_like(X)
+        cube = np.append(cube,np.array([Z, Y + self.Ymin_input.value(),X]).transpose(),axis=0)
+        cube = np.append(cube,np.array([Z, Y + self.Ymax_input.value(),X]).transpose(),axis=0)
+
+        Y,Z = np.meshgrid(np.arange(self.Ymin_input.value(),self.Ymax_input.value(),10),np.arange(self.Zmin_input.value(),self.Zmax_input.value(),10))
+        Y = Y.flatten()
+        Z = Z.flatten()
+        X = np.zeros_like(Y)
+        cube = np.append(cube,np.array([Z, Y, X + self.Ymin_input.value()]).transpose(),axis=0)
+        cube = np.append(cube,np.array([Z, Y, X + self.Ymax_input.value()]).transpose(),axis=0)
+
+        if "Box" in self.viewer.layers:
+            self.viewer.layers["Box"].data = cube
+        else:
+            self.viewer.add_points(cube, scale=(2,0.347,0.347), blending="translucent_no_depth", opacity=0.1, name="Box")
+
 class SetUpTracking(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
@@ -1452,4 +1621,4 @@ class ManualTracking(QWidget):
 
 # Napari plugin function
 def napari_experimental_provide_dock_widget():
-    return SetUpTracking, LoadTracking, ManualTracking
+    return SetUpTracking, LoadTracking, ManualTracking, Parabola
