@@ -26,6 +26,10 @@ contributions:
     - id: manual-3d.Parabola
       python_name: manual_3d:Parabola
       title: Parabola
+    # LoadSample
+    - id: manual-3d.LoadSample
+      python_name: manual_3d:LoadSample
+      title: Parabola
     # SetUpTracking
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
@@ -76,6 +80,9 @@ contributions:
     # Parabola
     - command: manual-3d.Parabola
       display_name: Parabola
+    # LoadSample
+    - command: manual-3d.LoadSample
+      display_name: LoadSample
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking

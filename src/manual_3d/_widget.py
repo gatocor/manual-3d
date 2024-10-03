@@ -47,20 +47,10 @@ import napari
 import re
 import json
 import inspect
+import skimage
 
 if TYPE_CHECKING:
     import napari
-
-class Load(QWidget):
-
-    def __init__(self, napari_viewer):
-        super().__init__()
-
-        # Add viewer
-        self.viewer = napari_viewer
-
-        # Create the layout
-        self.layout = QVBoxLayout()
 
 class Parabola(QWidget):
 
@@ -114,7 +104,7 @@ class Parabola(QWidget):
 
     def compute(self):
 
-        X,Y = np.meshgrid(np.arange(0,10000,10),np.arange(0,10000,10))
+        X,Y = np.meshgrid(np.arange(0,2300,10),np.arange(0,2300,10))
         X = X.flatten()
         Y = Y.flatten()
         Z = -((X-self.X_input.value())/self.R_input.value())**2-((Y-self.Y_input.value())/self.R_input.value())**2+self.Z_input.value()
@@ -212,15 +202,48 @@ class Box(QWidget):
         Y = Y.flatten()
         Z = Z.flatten()
         X = np.zeros_like(Y)
-        cube = np.append(cube,np.array([Z, Y, X + self.Ymin_input.value()]).transpose(),axis=0)
-        cube = np.append(cube,np.array([Z, Y, X + self.Ymax_input.value()]).transpose(),axis=0)
+        cube = np.append(cube,np.array([Z, Y, X + self.Xmin_input.value()]).transpose(),axis=0)
+        cube = np.append(cube,np.array([Z, Y, X + self.Xmax_input.value()]).transpose(),axis=0)
 
         if "Box" in self.viewer.layers:
             self.viewer.layers["Box"].data = cube
         else:
             self.viewer.add_points(cube, scale=(2,0.347,0.347), blending="translucent_no_depth", opacity=0.1, name="Box")
 
-class SetUpTracking(QWidget):
+class BaseSavePath(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Folder input for storing the JSON file
+        self.folder_label = QLabel("Path to where to save project:")
+        self.folder_input = QLineEdit(self)
+        self.browse_folder_button = QPushButton("Browse Folder")
+        self.browse_folder_button.clicked.connect(self.browse_json_folder)
+        self.layout.addWidget(self.folder_label)
+        self.layout.addWidget(self.folder_input)
+        self.layout.addWidget(self.browse_folder_button)
+
+        # Save button
+        self.exec_button = QPushButton("Create tracking project")
+        self.exec_button.clicked.connect(self.exec_function)
+        self.layout.addWidget(self.exec_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def browse_json_folder(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.folder_input.setText(folder_path)
+
+    def exec_function(self):
+        print("Empty function")
+        return
+class BaseSetUp(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
 
@@ -282,20 +305,6 @@ class SetUpTracking(QWidget):
         self.layout.addWidget(self.voxel_z_label)
         self.layout.addWidget(self.voxel_z_input)
 
-        # Folder input for storing the JSON file
-        self.folder_label = QLabel("Path to where to save project:")
-        self.folder_input = QLineEdit(self)
-        self.browse_folder_button = QPushButton("Browse Folder")
-        self.browse_folder_button.clicked.connect(self.browse_json_folder)
-        self.layout.addWidget(self.folder_label)
-        self.layout.addWidget(self.folder_input)
-        self.layout.addWidget(self.browse_folder_button)
-
-        # Save button
-        self.save_button = QPushButton("Create tracking project")
-        self.save_button.clicked.connect(self.save_to_json)
-        self.layout.addWidget(self.save_button)
-
         # Set the layout
         self.setLayout(self.layout)
 
@@ -309,12 +318,6 @@ class SetUpTracking(QWidget):
             self.path_input.setText(folder_path)
             self.count_files_in_folder(folder_path)
             self.detect_file_pattern(folder_path)
-
-    def browse_json_folder(self):
-        """Open a file dialog to select a folder to save JSON."""
-        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
-        if folder_path:
-            self.folder_input.setText(folder_path)
 
     def count_files_in_folder(self, folder_path):
         """Count the number of files in the selected folder and set the start and end points."""
@@ -380,8 +383,39 @@ class SetUpTracking(QWidget):
         except Exception as e:
             print(f"Error detecting file pattern: {e}")
 
+class LoadSample(BaseSetUp):
+    def __init__(self, napari_viewer):
+        super().__init__(napari_viewer)
 
-    def save_to_json(self):
+        # Save button
+        self.exec_button = QPushButton("Load Sample")
+        self.exec_button.clicked.connect(self.exec_function)
+        self.layout.addWidget(self.exec_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def exec_function(self):
+
+        path = self.path_input.text()
+        file1 = self.format_input.text().format(self.start_input.value())
+        file2 = self.format_input.text().format(self.end_input.value())
+        scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+
+        img = skimage.io.imread("{}/{}".format(path,file1))
+        self.viewer.add_image(img,scale=scale,colormap="green",opacity=0.5,name="Data t={}".format(self.start_input.value()))
+
+        img = skimage.io.imread("{}/{}".format(path,file2))
+        self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.5,name="Data t={}".format(self.end_input.value()))
+        
+        return
+    
+class SetUpTracking(BaseSetUp, BaseSavePath):
+    def __init__(self, napari_viewer):
+        BaseSetUp.__init__(self,napari_viewer)
+        BaseSavePath.__init__(self,napari_viewer)
+
+    def exec_function(self):
         """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
         settings = {
             'path_data': self.path_input.text(),
