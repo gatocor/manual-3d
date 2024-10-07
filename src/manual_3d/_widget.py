@@ -36,6 +36,7 @@ from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox, QApplication, QWidget, QDialog
 )
 from qtpy.QtCore import Qt
+from qtpy.QtCore import QTimer
 import os
 from skimage.util import img_as_float
 import numpy as np
@@ -1024,8 +1025,16 @@ class ManualTracking(QWidget):
         self.click_3D.setChecked(True)
         self.layout.addWidget(self.click_3D)
 
-        # Set the layout
-        self.setLayout(self.layout)
+        # Add checkbox for manual tracking activation/deactivation
+        self.rotate_3D = QCheckBox("3D automatic rotation")
+        self.rotate_3D.setChecked(True)
+        self.layout.addWidget(self.rotate_3D)
+        self.current_angle = None
+        self.target_angle = None
+        self.current_frame = 0
+        self.point1_angle = None
+        self.point2_angle = None
+        self.timer = None
 
         # Store references to new layers added (for easy removal)
         self.image_layer = self.viewer.layers['Data Layer']
@@ -1035,8 +1044,10 @@ class ManualTracking(QWidget):
         self.points_layer.events.data.connect(self.on_point_added)
 
         # Auxiliar connect
-        self.image_layer_aux = None
-        self.points_layer_aux = None
+        self.image_layer_aux_forw = None
+        self.image_layer_aux_back = None
+        self.points_layer_aux_forw = None
+        self.points_layer_aux_back = None
         self.process_image_layer_aux()
         self.process_points_layer_aux()
 
@@ -1085,14 +1096,27 @@ class ManualTracking(QWidget):
         self.layout.addWidget(self.save_button)
         self.save_button.clicked.connect(self.save)
 
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Reorder
+        self.viewer.layers["Data Layer"].opacity = 0.5
+        self.viewer.layers.move_multiple(
+            [
+            4,3,2,1,0,5,6
+            ]
+        )
+
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
-        if self.points_layer is not None:
-            self.points_layer.events.data.disconnect(self.on_point_added)
-        if self.image_layer_aux is not None:
-            self.viewer.layers.remove(self.image_layer_aux)
-        if self.points_layer_aux is not None:
-            self.viewer.layers.remove(self.points_layer_aux)
+        if self.image_layer_aux_forw is not None:
+            self.viewer.layers.remove(self.image_layer_aux_forw)
+        if self.image_layer_aux_back is not None:
+            self.viewer.layers.remove(self.image_layer_aux_back)
+        if self.points_layer_aux_forw is not None:
+            self.viewer.layers.remove(self.points_layer_aux_forw)
+        if self.points_layer_aux_back is not None:
+            self.viewer.layers.remove(self.points_layer_aux_back)
         super().hideEvent(event)
 
     def process_image_layer_aux(self):
@@ -1104,13 +1128,20 @@ class ManualTracking(QWidget):
 
             # Create a memory-efficient view by skipping the last frame of the original image
             view_image = original_image[:-1]  # This is a view, not a copy
-
             # Add an additional frame of zeros at the beginning without copying the entire array
             zero_frame = np.zeros_like(view_image[0:1])  # Just one frame of zeros
-            new_image = np.concatenate((zero_frame, view_image), axis=0)  # Combine with view
-
+            new_image_forward = np.concatenate((zero_frame, view_image), axis=0)  # Combine with view
             # Add the new image layer with green color code, keeping the original scale
-            self.image_layer_aux = self.viewer.add_image(new_image, colormap='green', name="Manual Tracking Data Layer", opacity=0.5, scale=original_scale)
+            self.image_layer_aux_forw = self.viewer.add_image(new_image_forward, colormap='green', name="Auxiliar Forward Image Layer", opacity=0.5, scale=original_scale, visible=False)
+
+            # Create a memory-efficient view by skipping the last frame of the original image
+            view_image = original_image[1:]  # This is a view, not a copy
+            # Add an additional frame of zeros at the beginning without copying the entire array
+            zero_frame = np.zeros_like(view_image[0:1])  # Just one frame of zeros
+            new_image_backward = np.concatenate((view_image, zero_frame), axis=0)  # Combine with view
+            # Add the new image layer with green color code, keeping the original scale
+            self.image_layer_aux_back = self.viewer.add_image(new_image_backward, colormap='red', name="Auxiliar Backward Image Layer", opacity=0.5, scale=original_scale, visible=False)
+
         else:
             print("Data Layer not found in the viewer.")
 
@@ -1122,12 +1153,19 @@ class ManualTracking(QWidget):
             original_scale = self.viewer.layers['Points Layer'].scale  # Get original scale
 
             # Create a view of the original points data and shift the time points backward
-            modified_points = original_points.copy()
-            modified_points[:, 0] += 1  # Assuming time is the first column
-            modified_points = modified_points[modified_points[:,0]<self.length]
-
+            modified_points_forw = original_points.copy()
+            modified_points_forw[:, 0] += 1  # Assuming time is the first column
+            modified_points_forw = modified_points_forw[modified_points_forw[:,0] < self.length]
             # Add the new points layer with green cross markers, keeping the original scale
-            self.points_layer_aux = self.viewer.add_points(modified_points, size=8, face_color='green', symbol='cross', name="Manual Tracking Points", scale=original_scale)
+            self.points_layer_aux_forw = self.viewer.add_points(modified_points_forw, size=8, face_color='green', symbol='cross', name="Auxiliar Forward Tracking Points", scale=original_scale, blending="translucent_no_depth", visible=False)
+
+            # Create a view of the original points data and shift the time points backward
+            modified_points_back = original_points.copy()
+            modified_points_back[:, 0] -= 1  # Assuming time is the first column
+            modified_points_back = modified_points_back[modified_points_back[:,0] >= 0]
+            # Add the new points layer with green cross markers, keeping the original scale
+            self.points_layer_aux_back = self.viewer.add_points(modified_points_back, size=8, face_color='red', symbol='cross', name="Auxiliar Backward Tracking Points", scale=original_scale, blending="translucent_no_depth", visible=False)
+
         else:
             print("Points Layer not found in the viewer.")
 
@@ -1176,7 +1214,7 @@ class ManualTracking(QWidget):
 
                     return
 
-            elif self.tracking_time-1 != self.get_time() and self.tracking_forward:    
+            elif self.tracking_time-1 != self.get_time() and not self.tracking_forward:    
                 reply = QMessageBox.question(
                     self, 
                     'Backward trajectory causality broken', 
@@ -1209,7 +1247,10 @@ class ManualTracking(QWidget):
             self.update_tracks_layer_with_new_point(new_point)
             new_point[0] += 1
             if new_point[0] < self.length:
-                self.add_point(self.points_layer_aux, new_point)
+                self.add_point(self.points_layer_aux_forw, new_point)
+            new_point[0] -= 2
+            if new_point[0] > 0:
+                self.add_point(self.points_layer_aux_back, new_point)
 
             self.jump_next()
 
@@ -1217,10 +1258,15 @@ class ManualTracking(QWidget):
 
             # If it's the first point, store it and its direction
             if self.point1 is None:
+
                 self.point1 = new_point
                 self.direction1 = self.compute_camera_direction()  # Replace with your own logic to get direction
                 if self.debugging.isChecked():
                     print(f"First point stored at: {self.point1}, direction: {self.direction1}")
+
+                self.point1_angle = self.viewer.camera.angles
+                if self.rotate_3D.isChecked() and self.point2_angle != None:
+                    self.rotate_3D_animation(self.point2_angle)
 
                 return
             
@@ -1251,7 +1297,38 @@ class ManualTracking(QWidget):
                 self.point1 = None
                 self.point2 = None
 
+                self.point2_angle = self.viewer.camera.angles
+                if self.rotate_3D.isChecked() and self.point1_angle != None:
+                    self.rotate_3D_animation(self.point1_angle)
+
                 self.jump_next()
+
+    def rotate_camera(self):
+
+        # Calculate new position based on interpolation
+        new_angle = (1-self.current_frame/12)*self.current_angle + self.current_frame/12*self.target_angle
+
+        # Update the camera's position (center)
+        self.viewer.camera.angles = new_angle
+
+        # Increment the frame counter
+        self.current_frame += 1
+
+        # Stop the timer when the final frame is reached
+        if self.current_frame >= 12:
+            self.timer.stop()
+
+    def rotate_3D_animation(self,target_angle):
+
+        self.current_angle = np.array(self.viewer.camera.angles)
+        self.target_angle = np.array(target_angle)
+        self.current_frame = 0
+
+        # Set up a timer to call rotate_camera function periodically (dynamic rotation)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.rotate_camera)
+        self.timer.start(1)  # 30 milliseconds per frame
+
 
     def get_time(self):
         return self.viewer.dims.current_step[0]
@@ -1311,7 +1388,10 @@ class ManualTracking(QWidget):
 
         closest_point[0] += 1
         if closest_point[0] < self.length:
-            self.add_point(self.points_layer_aux, closest_point)
+            self.add_point(self.points_layer_aux_forw, closest_point)
+        closest_point[0] -= 2
+        if closest_point[0] > 0:
+            self.add_point(self.points_layer_aux_back, closest_point)
 
         if self.debugging.isChecked():
             print(f"First two points removed and closest point {closest_point} appended.")
@@ -1338,6 +1418,9 @@ class ManualTracking(QWidget):
         """
         Create a new tracking id and activate the tracking.
         """
+
+        self.viewer.layers.selection = [self.viewer.layers["Points Layer"]]
+        self.viewer.layers["Points Layer"].mode = 'add'
 
         if self.tracking_active:
 
@@ -1453,23 +1536,45 @@ class ManualTracking(QWidget):
 
                     return
 
-        elif self.length > self.get_time()+1:
-        
-            self.setup_active_tracking()
 
         else:
 
-            msg = QMessageBox()
-            msg.setWindowTitle("Final time point")
-            msg.setText("You are in the last time point so you cannot start a track.")
-            msg.setIcon(QMessageBox.Warning)
+            if self.get_time() == 0:
 
-            # Add more than two buttons
-            button_yes = msg.addButton("Okay", QMessageBox.ActionRole)
+                msg = QMessageBox()
+                msg.setWindowTitle("Initial trime point")
+                msg.setText("You are in the first time point so you are starting a forward tracking.")
+                msg.setIcon(QMessageBox.Warning)
 
-            msg.exec_()
+                # Add more than two buttons
+                button_yes = msg.addButton("Okay", QMessageBox.ActionRole)
 
-        return
+                msg.exec_()
+
+                self.tracking_forward = True
+                self.setup_active_tracking()
+
+            elif self.length > self.get_time()+1:
+
+                self.question_tracking_direction()
+                self.setup_active_tracking()
+
+            else:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Last trime point")
+                msg.setText("You are in the last time point so you are starting a backward tracking.")
+                msg.setIcon(QMessageBox.Warning)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                self.tracking_forward = False
+                self.setup_active_tracking()
+
+            return
     
     def setup_active_tracking(self, id=None, tracking_time=None):
 
@@ -1489,6 +1594,17 @@ class ManualTracking(QWidget):
         else:
             self.tracking_time = tracking_time
 
+        if self.tracking_forward:
+            self.viewer.layers["Auxiliar Backward Tracking Points"].visible = False
+            self.viewer.layers["Auxiliar Backward Image Layer"].visible = False
+            self.viewer.layers["Auxiliar Forward Tracking Points"].visible = True
+            self.viewer.layers["Auxiliar Forward Image Layer"].visible = True
+        else:
+            self.viewer.layers["Auxiliar Backward Tracking Points"].visible = True
+            self.viewer.layers["Auxiliar Backward Image Layer"].visible = True
+            self.viewer.layers["Auxiliar Forward Tracking Points"].visible = False
+            self.viewer.layers["Auxiliar Forward Image Layer"].visible = False
+
         self.start_tracking_button.setStyleSheet(
                     "QPushButton {"
                         "background-color: green;"  # Green background
@@ -1506,6 +1622,10 @@ class ManualTracking(QWidget):
         self.tracking_active_id = np.nan
 
         self.start_tracking_button.setStyleSheet("")
+
+        self.points_layer.selected_data = []
+        self.point1_angle = None
+        self.point2_angle = None
 
         return
 
@@ -1531,7 +1651,7 @@ class ManualTracking(QWidget):
 
                 msg.exec_()
 
-            elif 0 >= self.get_time()-1 and self.tracking_forward:
+            elif 0 > self.get_time()-1 and not self.tracking_forward:
 
                 self.stop_tracking()
 
