@@ -395,6 +395,15 @@ class LoadSample(BaseSetUp):
     def __init__(self, napari_viewer):
         super().__init__(napari_viewer)
 
+        # Steps
+        self.step_label = QLabel("Steps:")
+        self.step_input = QSpinBox(self)
+        self.step_input.setMinimum(-1)
+        self.step_input.setMaximum(999999)
+        self.step_input.setValue(-1)
+        self.layout.addWidget(self.step_label)
+        self.layout.addWidget(self.step_input)
+
         # Save button
         self.exec_button = QPushButton("Load Sample")
         self.exec_button.clicked.connect(self.exec_function)
@@ -406,15 +415,17 @@ class LoadSample(BaseSetUp):
     def exec_function(self):
 
         path = self.path_input.text()
-        file1 = self.format_input.text().format(self.start_input.value())
-        file2 = self.format_input.text().format(self.end_input.value())
-        scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+        if self.step_input.value() == -1:
+            l = [0, self.end_input.value()]
+        else:
+            l = range(self.start_input.value(), self.end_input.value(), self.step_input.value())
 
-        img = skimage.io.imread("{}/{}".format(path,file1))
-        self.viewer.add_image(img,scale=scale,colormap="green",opacity=0.5,name="Data t={}".format(self.start_input.value()))
+        for i in l:
+            file = self.format_input.text().format(i)
+            scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
 
-        img = skimage.io.imread("{}/{}".format(path,file2))
-        self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.5,name="Data t={}".format(self.end_input.value()))
+            img = skimage.io.imread("{}/{}".format(path,file))
+            self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.2,name="Data t={}".format(i))
         
         return
     
@@ -595,51 +606,59 @@ class SetUpTrackingDialog(QDialog):
             if len(file_list) < 2:
                 return  # We need at least two files to detect a pattern
 
-            # Compare first and final filenames to identify the changing numeric pattern
-            file_1, file_2 = file_list[0], file_list[-1]
-            format_str = []
-            num_pattern = re.compile(r'\d+')  # Pattern to match numbers
+            # Prepare to capture numeric patterns and invalid files
+            num_pattern = re.compile(r'\d+')
+            valid_files = []
             numeric_values = []
+            format_str = None
 
+            for file_name in file_list:
+                match = num_pattern.search(file_name)
+                if match:
+                    valid_files.append(file_name)
+                    numeric_values.append(int(match.group(0)))
+                else:
+                    print(f"File {file_name} does not follow the numeric pattern and will be skipped.")
+
+            if len(valid_files) < 2:
+                print("Not enough valid files to detect a pattern.")
+                return
+
+            # Compare first and last valid filenames
+            file_1, file_2 = valid_files[0], valid_files[-1]
+            format_str_parts = []
             i = 0
+
             while i < len(file_1):
                 if i < len(file_2) and file_1[i] == file_2[i]:
-                    format_str.append(file_1[i])  # If characters are the same, add them to format
+                    format_str_parts.append(file_1[i])
                 elif num_pattern.match(file_1[i:]):
-                    # Detect numeric sequence, determine its length
                     num_match_1 = num_pattern.match(file_1[i:])
                     num_match_2 = num_pattern.match(file_2[i:])
-                    
                     if num_match_1 and num_match_2:
                         length_1 = len(num_match_1.group(0))
                         length_2 = len(num_match_2.group(0))
-                        if length_1 == length_2:  # Only replace if the lengths of numbers are the same
-                            format_str.append(f"{{:0{length_1}d}}")  # Use the correct number of digits
-                            # Collect the numeric values from all files to detect min/max
-                            for file_name in file_list:
-                                match = num_pattern.search(file_name)
-                                if match:
-                                    numeric_values.append(int(match.group(0)))
-                            i += length_1 - 1  # Skip past the numeric part
+                        if length_1 == length_2:
+                            format_str_parts.append(f"{{:0{length_1}d}}")
+                            i += length_1 - 1  # Skip the numeric section
                         else:
-                            format_str.append(file_1[i])
-                    else:
-                        format_str.append(file_1[i])
+                            format_str_parts.append(file_1[i])
                 else:
-                    format_str.append(file_1[i])
+                    format_str_parts.append(file_1[i])
                 i += 1
 
             # Join format string and update the format input
-            detected_format = ''.join(format_str)
-            self.format_input.setText(detected_format)
+            format_str = ''.join(format_str_parts)
+            self.format_input.setText(format_str)
 
-            # Set start and end points based on the detected numeric sequence
+            # Set start and end points based on detected numeric sequence
             if numeric_values:
                 self.start_input.setValue(min(numeric_values))
                 self.end_input.setValue(max(numeric_values))
 
         except Exception as e:
             print(f"Error detecting file pattern: {e}")
+
 
 
     def save_to_json(self):
@@ -1039,9 +1058,14 @@ class ManualTracking(QWidget):
         # Store references to new layers added (for easy removal)
         self.image_layer = self.viewer.layers['Data Layer']
         self.points_layer = self.viewer.layers['Points Layer']
+        self.add = self.points_layer.add
+        self.points_layer.add = self.add_points
+        self.remove_selected = self.points_layer.remove_selected
+        self.points_layer.remove_selected = self.remove
         self.tracking_layer = self.viewer.layers['Tracking Layer']
         self.length = len(self.image_layer.data)
-        self.points_layer.events.data.connect(self.on_point_added)
+        # self.points_layer.events.data.connect(self.on_point_added)
+        self.viewer.mouse_drag_callbacks.append(self.connect_point)
 
         # Auxiliar connect
         self.image_layer_aux_forw = None
@@ -1107,8 +1131,17 @@ class ManualTracking(QWidget):
             ]
         )
 
+    def connect_point(self, *args):
+
+        if self.tracking_active:
+            print("Active and point selected")
+
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
+        if self.points_layer is not None:
+            # self.points_layer.events.data.disconnect(self.on_point_added)
+            self.points_layer.remove_selected = self.remove_selected
+            self.points_layer.add = self.add
         if self.image_layer_aux_forw is not None:
             self.viewer.layers.remove(self.image_layer_aux_forw)
         if self.image_layer_aux_back is not None:
@@ -1117,6 +1150,7 @@ class ManualTracking(QWidget):
             self.viewer.layers.remove(self.points_layer_aux_forw)
         if self.points_layer_aux_back is not None:
             self.viewer.layers.remove(self.points_layer_aux_back)
+
         super().hideEvent(event)
 
     def process_image_layer_aux(self):
@@ -1169,29 +1203,19 @@ class ManualTracking(QWidget):
         else:
             print("Points Layer not found in the viewer.")
 
-    def on_point_added(self, event):
+    def add_points(self, new_point):
         """Callback triggered when a new point is added to the points layer."""
-
-        if self.counter == 0:
-            self.counter = 1
-            return
-        else:
-            self.counter = 0
-
-        if self.prevent_update:
-            return
-
-        if not self.click_3D.isChecked():
-            return
         
         if 0 in self.viewer.dims.displayed:
             if self.debugging.isChecked():
-                print("Not in (XYZ) perspective. Ignoring point addition.")
-            self.removePoint(self.points_layer)
+                print("Some axis is not an spatial perspective. Ignoring point addition.")
             return
 
+        # Checking causality
         if self.tracking_active:
+
             if self.tracking_time+1 != self.get_time() and self.tracking_forward:    
+
                 reply = QMessageBox.question(
                     self, 
                     'Forward trajectory causality broken', 
@@ -1201,20 +1225,14 @@ class ManualTracking(QWidget):
                 )
 
                 if reply == QMessageBox.No:
-
-                    self.remove_point(self.points_layer)
                     self.stop_tracking()
-
                     return
-                
                 elif reply == QMessageBox.Yes:
-
-                    self.remove_point(self.points_layer)
                     self.viewer.dims.current_step = (self.tracking_time+1, *self.viewer.dims.current_step[1:])
-
                     return
 
             elif self.tracking_time-1 != self.get_time() and not self.tracking_forward:    
+
                 reply = QMessageBox.question(
                     self, 
                     'Backward trajectory causality broken', 
@@ -1224,35 +1242,27 @@ class ManualTracking(QWidget):
                 )
 
                 if reply == QMessageBox.No:
-
-                    self.remove_point(self.points_layer)
                     self.stop_tracking()
-
                     return
-                
                 elif reply == QMessageBox.Yes:
-
-                    self.remove_point(self.points_layer)
                     self.viewer.dims.current_step = (self.tracking_time-1, *self.viewer.dims.current_step[1:])
-
                     return
-
-        # Get the added point (most recent point is the first one)
-        new_point = self.points_layer.data[-1].copy()  # First point added to the layer
 
         if self.viewer.dims.ndisplay == 2:
 
             # Add tracking
+            self.add(new_point)
             self.add_point_properties(self.points_layer)
             self.update_tracks_layer_with_new_point(new_point)
             new_point[0] += 1
             if new_point[0] < self.length:
-                self.add_point(self.points_layer_aux_forw, new_point)
+                self.points_layer_aux_forw.add(new_point)
             new_point[0] -= 2
             if new_point[0] > 0:
-                self.add_point(self.points_layer_aux_back, new_point)
+                self.points_layer_aux_back.add(new_point)
 
-            self.jump_next()
+            if self.tracking_active:
+                self.jump_next()
 
         elif self.viewer.dims.ndisplay == 3:
 
@@ -1267,6 +1277,8 @@ class ManualTracking(QWidget):
                 self.point1_angle = self.viewer.camera.angles
                 if self.rotate_3D.isChecked() and self.point2_angle != None:
                     self.rotate_3D_animation(self.point2_angle)
+
+                self.add(self.point1)
 
                 return
             
@@ -1284,6 +1296,7 @@ class ManualTracking(QWidget):
                     print(f"Closest point calculated at: {closest_point}")
 
                 # Remove the last two points (the first two added) and add the calculated closest point at the beginning
+                # self.remove(len(self.))
                 self.update_points_layer_with_closest_point(np.append([self.point1[0]],closest_point))
 
                 # Add tracking
@@ -1302,6 +1315,61 @@ class ManualTracking(QWidget):
                     self.rotate_3D_animation(self.point1_angle)
 
                 self.jump_next()
+
+    def remove(self):
+
+        selected_pos = list(self.points_layer.selected_data)
+        selected_id = self.points_layer.properties["id"][selected_pos]
+        
+        print(selected_id)
+        if np.all(np.isnan(selected_id)):
+
+            self.prevent_update = True
+            self.remove_selected()
+            self.prevent_update = False
+
+        elif len(selected_pos) > 1:
+
+            msg = QMessageBox()
+            msg.setWindowTitle("Multiple deletions")
+            msg.setText("We are preventing to remove several points at the same time. Just select one per deletion.")
+            msg.setIcon(QMessageBox.Question)
+
+            # Add more than two buttons
+            button_forward = msg.addButton("Okay", QMessageBox.ActionRole)
+
+            msg.exec_()
+
+            return
+        
+        elif len(self.points_layer.selected_data) == 1:
+
+            selected_point = self.points_layer.data[selected_pos[0]] 
+            selected_id = self.points_layer.properties["id"][selected_pos[0]]
+            
+            msg = QMessageBox()
+            msg.setWindowTitle("Point removal")
+            msg.setText("Do you want to remove just this point or the whole track.")
+            msg.setIcon(QMessageBox.Question)
+
+            # Add more than two buttons
+            button_point = msg.addButton("Remove Point", QMessageBox.ActionRole)
+            button_track = msg.addButton("Remove Track", QMessageBox.ActionRole)
+            button_cancel = msg.addButton("Cancel", QMessageBox.ActionRole)
+
+            msg.exec_()
+
+            if msg.clickedButton() == button_point:
+
+                self.remove_track_point(selected_point, selected_id)
+
+            elif msg.clickedButton() == button_track:
+
+                self.remove_track(selected_point, selected_id)
+
+            elif msg.clickedButton() == button_cancel:
+
+                return
 
     def rotate_camera(self):
 
@@ -1356,7 +1424,10 @@ class ManualTracking(QWidget):
     def add_point_properties(self, points_layer):
 
         if "id" in points_layer.properties.keys():
-            points_layer.properties["id"][-1] = self.tracking_active_id
+            if self.tracking_active:
+                points_layer.properties["id"][-1] = self.tracking_active_id
+            else:
+                points_layer.properties["id"][-1] = np.nan
 
         return
 
@@ -1390,7 +1461,7 @@ class ManualTracking(QWidget):
         if closest_point[0] < self.length:
             self.add_point(self.points_layer_aux_forw, closest_point)
         closest_point[0] -= 2
-        if closest_point[0] > 0:
+        if closest_point[0] == 0:
             self.add_point(self.points_layer_aux_back, closest_point)
 
         if self.debugging.isChecked():
@@ -1420,7 +1491,7 @@ class ManualTracking(QWidget):
         """
 
         self.viewer.layers.selection = [self.viewer.layers["Points Layer"]]
-        self.viewer.layers["Points Layer"].mode = 'add'
+        # self.viewer.layers["Points Layer"].mode = 'add'
 
         if self.tracking_active:
 
@@ -1464,12 +1535,44 @@ class ManualTracking(QWidget):
 
                 if msg.clickedButton() == button_yes:
 
-                    self.question_tracking_direction()
+                    if selected_time == 0:
+
+                        self.tracking_forward = True
+
+                        msg = QMessageBox()
+                        msg.setWindowTitle("Start from first point")
+                        msg.setText("This is the first point, we are starting a forward tracking.")
+                        msg.setIcon(QMessageBox.Question)
+
+                        # Add more than two buttons
+                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                        msg.exec_()
+
+                    elif selected_time == self.length - 1:
+
+                        self.tracking_forward = False
+
+                        msg = QMessageBox()
+                        msg.setWindowTitle("Start from last point")
+                        msg.setText("This is the last point, we are starting a backward tracking.")
+                        msg.setIcon(QMessageBox.Question)
+
+                        # Add more than two buttons
+                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                        msg.exec_()
+
+                    else:
+
+                        self.question_tracking_direction()
 
                     self.setup_active_tracking(id=None, tracking_time=selected_time)
                     self.update_tracks_layer_with_new_point(selected_point)
                     self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
                     self.jump_next()
+
+                    return
 
                 elif msg.clickedButton() == button_no:
 
@@ -1495,16 +1598,7 @@ class ManualTracking(QWidget):
 
                     #Relabel future branch
                     self.tracking_forward = True
-                    self.setup_active_tracking()
-                    keep_ids = self.tracking_layer.data[:,0] == selected_id
-                    keep_times = self.tracking_layer.data[:,1] > selected_time
-                    change = keep_ids*keep_times
-                    self.tracking_layer.data[change,0] = self.tracking_active_id
-                    keep_ids = self.points_layer.properties["id"] == selected_id
-                    keep_times = self.points_layer.data[:,1] > selected_time
-                    change = keep_ids*keep_times
-                    self.points_layer.properties["id"][change] = self.tracking_active_id
-                    self.update_tracks_layer_with_new_point(selected_point)
+                    self.relabel_track(selected_point, selected_id)
                     self.setup_active_tracking()
                     self.update_tracks_layer_with_new_point(selected_point)
                     self.jump_next()
@@ -1536,6 +1630,14 @@ class ManualTracking(QWidget):
 
                     return
 
+        elif len(self.points_layer.selected_data) > 1:
+
+            msg = QMessageBox()
+            msg.setWindowTitle("Several points")
+            msg.setText(f"You cannot activate a tracking with several points selected.")
+            msg.setIcon(QMessageBox.Question)
+
+            msg.exec_()
 
         else:
 
@@ -1576,6 +1678,64 @@ class ManualTracking(QWidget):
 
             return
     
+    def relabel_track(self, selected_point, selected_id):
+
+        selected_time = selected_point[0]
+        self.tracking_max_id += 1
+        keep_ids = self.tracking_layer.data[:,0] == selected_id
+        keep_times = self.tracking_layer.data[:,1] > selected_time
+        change = keep_ids*keep_times
+        self.tracking_layer.data[change,0] = self.tracking_max_id
+        keep_ids = self.points_layer.properties["id"] == selected_id
+        keep_times = self.points_layer.data[:,1] > selected_time
+        change = keep_ids*keep_times
+        self.points_layer.properties["id"][change] = self.tracking_max_id
+        self.update_tracks_layer_with_new_point(selected_point)
+
+    def remove_track_point(self, selected_point, selected_id):
+
+        selected_time = selected_point[0]
+
+        # Relabel
+        self.tracking_max_id += 1
+        keep_ids = self.tracking_layer.data[:,0] == selected_id
+        keep_times = self.tracking_layer.data[:,1] > selected_time
+        change = keep_ids*keep_times
+        self.tracking_layer.data[change,0] = self.tracking_max_id
+
+        keep_ids = self.points_layer.properties["id"] == selected_id
+        keep_times = self.points_layer.data[:,1] > selected_time
+        change = keep_ids*keep_times
+        self.points_layer.properties["id"][change] = self.tracking_max_id
+
+        # Remove point
+        self.prevent_update = True
+
+        keep_ids = self.tracking_layer.data[:,0] == selected_id
+        keep_times = self.tracking_layer.data[:,1] == selected_time
+        change = ~(keep_ids*keep_times)
+        self.tracking_layer.data = self.tracking_layer.data[change,:]
+
+        keep_ids = self.points_layer.properties["id"] == self.tracking_max_id
+        keep_times = self.points_layer.data[:,0] == selected_time
+        change = ~(keep_ids*keep_times)
+        self.points_layer.data = self.points_layer.data[change,:]
+
+        self.prevent_update = False
+
+    def remove_track(self, selected_point, selected_id):
+
+        # Remove points
+        self.prevent_update = True
+
+        keep_ids = ~(self.tracking_layer.data[:,0] == selected_id)
+        self.tracking_layer.data = self.tracking_layer.data[keep_ids,:]
+
+        keep_ids = ~(self.points_layer.properties["id"] == selected_id)
+        self.points_layer.data = self.points_layer.data[keep_ids,:]
+
+        self.prevent_update = False
+
     def setup_active_tracking(self, id=None, tracking_time=None):
 
         if id == None:
