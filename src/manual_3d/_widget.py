@@ -404,6 +404,11 @@ class LoadSample(BaseSetUp):
         self.layout.addWidget(self.step_label)
         self.layout.addWidget(self.step_input)
 
+        # Maximum
+        self.maxproj_checkbox = QCheckBox("Max projection")
+        self.maxproj_checkbox.setChecked(True)
+        self.layout.addWidget(self.maxproj_checkbox)
+
         # Save button
         self.exec_button = QPushButton("Load Sample")
         self.exec_button.clicked.connect(self.exec_function)
@@ -420,12 +425,14 @@ class LoadSample(BaseSetUp):
         else:
             l = range(self.start_input.value(), self.end_input.value(), self.step_input.value())
 
+        file = self.format_input.text().format(l[0])
+        img = skimage.io.imread("{}/{}".format(path,file))
         for i in l:
             file = self.format_input.text().format(i)
-            scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-
-            img = skimage.io.imread("{}/{}".format(path,file))
-            self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.2,name="Data t={}".format(i))
+            img = np.maximum([skimage.io.imread("{}/{}".format(path,file)), img])
+        
+        scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+        self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.2)
         
         return
     
@@ -1261,9 +1268,6 @@ class ManualTracking(QWidget):
             if new_point[0] > 0:
                 self.points_layer_aux_back.add(new_point)
 
-            if self.tracking_active:
-                self.jump_next()
-
         elif self.viewer.dims.ndisplay == 3:
 
             # If it's the first point, store it and its direction
@@ -1292,12 +1296,14 @@ class ManualTracking(QWidget):
 
                 # Calculate the closest point between the two lines
                 closest_point = self.calculate_closest_point(self.point1[1:], self.direction1, self.point2[1:], self.direction2)
+                closest_point = np.append([self.point1[0]],closest_point)
                 if self.debugging.isChecked():
                     print(f"Closest point calculated at: {closest_point}")
 
                 # Remove the last two points (the first two added) and add the calculated closest point at the beginning
                 # self.remove(len(self.))
-                self.update_points_layer_with_closest_point(np.append([self.point1[0]],closest_point))
+                self.points_layer.data = self.points_layer.data[:-1] 
+                self.add(closest_point)
 
                 # Add tracking
                 self.update_tracks_layer_with_new_point(np.append([self.point1[0]],closest_point))
@@ -1314,7 +1320,8 @@ class ManualTracking(QWidget):
                 if self.rotate_3D.isChecked() and self.point1_angle != None:
                     self.rotate_3D_animation(self.point1_angle)
 
-                self.jump_next()
+        if self.tracking_active:
+            self.jump_next()
 
     def remove(self):
 
