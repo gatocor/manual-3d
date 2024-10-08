@@ -429,7 +429,7 @@ class LoadSample(BaseSetUp):
         img = skimage.io.imread("{}/{}".format(path,file))
         for i in l:
             file = self.format_input.text().format(i)
-            img = np.maximum([skimage.io.imread("{}/{}".format(path,file)), img])
+            img = np.maximum(skimage.io.imread("{}/{}".format(path,file)), img)
         
         scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
         self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.2)
@@ -1261,6 +1261,7 @@ class ManualTracking(QWidget):
             self.add(new_point)
             self.add_point_properties(self.points_layer)
             self.update_tracks_layer_with_new_point(new_point)
+            #Add auxiliar
             new_point[0] += 1
             if new_point[0] < self.length:
                 self.points_layer_aux_forw.add(new_point)
@@ -1300,13 +1301,18 @@ class ManualTracking(QWidget):
                 if self.debugging.isChecked():
                     print(f"Closest point calculated at: {closest_point}")
 
-                # Remove the last two points (the first two added) and add the calculated closest point at the beginning
-                # self.remove(len(self.))
+                # Add closest
                 self.points_layer.data = self.points_layer.data[:-1] 
                 self.add(closest_point)
-
-                # Add tracking
                 self.update_tracks_layer_with_new_point(np.append([self.point1[0]],closest_point))
+
+                #Add auxiliar
+                closest_point[0] += 1
+                if closest_point[0] < self.length:
+                    self.points_layer_aux_forw.add(closest_point)
+                closest_point[0] -= 2
+                if closest_point[0] > 0:
+                    self.points_layer_aux_back.add(closest_point)
 
                 # # Update vectors layer with the vectors from points and directions
                 # if self.vectorcheckbox.isChecked():
@@ -1319,6 +1325,8 @@ class ManualTracking(QWidget):
                 self.point2_angle = self.viewer.camera.angles
                 if self.rotate_3D.isChecked() and self.point1_angle != None:
                     self.rotate_3D_animation(self.point1_angle)
+
+        print(self.tracking_time)
 
         if self.tracking_active:
             self.jump_next()
