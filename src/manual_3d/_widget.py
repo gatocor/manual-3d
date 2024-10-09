@@ -35,8 +35,7 @@ from magicgui.widgets import CheckBox, Container, create_widget
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox, QMessageBox, QApplication, QWidget, QDialog
 )
-from qtpy.QtCore import Qt
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import Qt, QTimer, QEventLoop
 import os
 from skimage.util import img_as_float
 import numpy as np
@@ -432,7 +431,7 @@ class LoadSample(BaseSetUp):
             img = np.maximum(skimage.io.imread("{}/{}".format(path,file)), img)
         
         scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-        self.viewer.add_image(img,scale=scale,colormap="red",opacity=0.2)
+        self.viewer.add_image(img,scale=scale,colormap="red",opacity=1)
         
         return
     
@@ -665,8 +664,6 @@ class SetUpTrackingDialog(QDialog):
 
         except Exception as e:
             print(f"Error detecting file pattern: {e}")
-
-
 
     def save_to_json(self):
         """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
@@ -1140,7 +1137,7 @@ class ManualTracking(QWidget):
 
     def connect_point(self, *args):
 
-        if self.tracking_active:
+        if False:
             print("Active and point selected")
 
     def hideEvent(self, event):
@@ -1217,6 +1214,9 @@ class ManualTracking(QWidget):
             if self.debugging.isChecked():
                 print("Some axis is not an spatial perspective. Ignoring point addition.")
             return
+        
+        if self.timer != None:
+            return
 
         # Checking causality
         if self.tracking_active:
@@ -1255,6 +1255,7 @@ class ManualTracking(QWidget):
                     self.viewer.dims.current_step = (self.tracking_time-1, *self.viewer.dims.current_step[1:])
                     return
 
+        # Add point in 2D or 3D
         if self.viewer.dims.ndisplay == 2:
 
             # Add tracking
@@ -1262,12 +1263,7 @@ class ManualTracking(QWidget):
             self.add_point_properties(self.points_layer)
             self.update_tracks_layer_with_new_point(new_point)
             #Add auxiliar
-            new_point[0] += 1
-            if new_point[0] < self.length:
-                self.points_layer_aux_forw.add(new_point)
-            new_point[0] -= 2
-            if new_point[0] > 0:
-                self.points_layer_aux_back.add(new_point)
+            self.add_point_auxiliar(new_point)
 
         elif self.viewer.dims.ndisplay == 3:
 
@@ -1287,32 +1283,25 @@ class ManualTracking(QWidget):
 
                 return
             
-            elif self.point2 is None:
+            else:
 
                 # If it's the second point, store it and calculate the closest point
-                self.point2 = new_point
                 self.direction2 = self.compute_camera_direction()  # Replace with your own logic to get direction
                 if self.debugging.isChecked():
                     print(f"Second point stored at: {self.point2}, direction: {self.direction2}")
 
                 # Calculate the closest point between the two lines
-                closest_point = self.calculate_closest_point(self.point1[1:], self.direction1, self.point2[1:], self.direction2)
-                closest_point = np.append([self.point1[0]],closest_point)
+                closest_point = self.calculate_closest_point(self.point1, self.direction1, new_point, self.direction2)
                 if self.debugging.isChecked():
                     print(f"Closest point calculated at: {closest_point}")
 
                 # Add closest
                 self.points_layer.data = self.points_layer.data[:-1] 
                 self.add(closest_point)
-                self.update_tracks_layer_with_new_point(np.append([self.point1[0]],closest_point))
+                self.update_tracks_layer_with_new_point(closest_point)
 
                 #Add auxiliar
-                closest_point[0] += 1
-                if closest_point[0] < self.length:
-                    self.points_layer_aux_forw.add(closest_point)
-                closest_point[0] -= 2
-                if closest_point[0] > 0:
-                    self.points_layer_aux_back.add(closest_point)
+                self.add_point_auxiliar(closest_point)
 
                 # # Update vectors layer with the vectors from points and directions
                 # if self.vectorcheckbox.isChecked():
@@ -1320,16 +1309,22 @@ class ManualTracking(QWidget):
 
                 # Reset point storage for the next pair of points
                 self.point1 = None
-                self.point2 = None
 
                 self.point2_angle = self.viewer.camera.angles
                 if self.rotate_3D.isChecked() and self.point1_angle != None:
                     self.rotate_3D_animation(self.point1_angle)
 
-        print(self.tracking_time)
-
         if self.tracking_active:
             self.jump_next()
+
+    def add_point_auxiliar(self, new_point):
+
+        new_point[0] += 1
+        if new_point[0] < self.length:
+            self.points_layer_aux_forw.add(new_point)
+        new_point[0] -= 2
+        if new_point[0] >= 0:
+            self.points_layer_aux_back.add(new_point)
 
     def remove(self):
 
@@ -1387,31 +1382,50 @@ class ManualTracking(QWidget):
                 return
 
     def rotate_camera(self):
-
         # Calculate new position based on interpolation
-        new_angle = (1-self.current_frame/12)*self.current_angle + self.current_frame/12*self.target_angle
-
+        new_angle = (1 - self.current_frame / 6) * self.current_angle + (self.current_frame / 6) * self.target_angle
+        
         # Update the camera's position (center)
         self.viewer.camera.angles = new_angle
-
+        
         # Increment the frame counter
         self.current_frame += 1
-
-        # Stop the timer when the final frame is reached
-        if self.current_frame >= 12:
+                
+        if self.current_frame >= 6:
+            # Stop the timer when the final frame is reached
             self.timer.stop()
+            self.loop.quit()  # Exit the event loop after completing the last frame
+        else:
+            # Continue the rotation by restarting the timer for the next frame
+            self.timer.start(0)  # 30 milliseconds per frame
 
-    def rotate_3D_animation(self,target_angle):
+    def rotate_3D_animation(self, target_angle):
 
+        self.viewer.camera.interactive = False
+        self.viewer.layers.selection.active = None
+        
+        # Initialize current angle and target angle
         self.current_angle = np.array(self.viewer.camera.angles)
         self.target_angle = np.array(target_angle)
-        self.current_frame = 0
+        self.current_frame = 0  # Start from the first frame
 
-        # Set up a timer to call rotate_camera function periodically (dynamic rotation)
+        # Set up the timer to call rotate_camera function periodically (dynamic rotation)
         self.timer = QTimer()
+        self.timer.setSingleShot(True)  # SingleShot ensures we control timer manually
         self.timer.timeout.connect(self.rotate_camera)
-        self.timer.start(1)  # 30 milliseconds per frame
 
+        # Set up the event loop
+        self.loop = QEventLoop()
+
+        # Start the first frame (timer will be restarted inside rotate_camera)
+        self.timer.start(0)  # Start the first frame with a delay of 30 ms
+
+        # Start the event loop, which will block until rotate_camera completes
+        self.loop.exec_()
+
+        self.timer = None
+        self.viewer.camera.interactive = True
+        self.viewer.layers.selection.active = self.points_layer
 
     def get_time(self):
         return self.viewer.dims.current_step[0]
@@ -1883,7 +1897,7 @@ class ManualTracking(QWidget):
 
         return view_direction
 
-    def calculate_closest_point(self, P1, d1, P2, d2):
+    def calculate_closest_point(self, point1, d1, point2, d2):
         """
         Finds the closest points on two skew (non-intersecting) lines in 3D.
         
@@ -1906,6 +1920,10 @@ class ManualTracking(QWidget):
             The shortest distance between the two lines.
         """
         
+        time = point1[0]
+        P1 = point1[1:]
+        P2 = point2[1:]
+
         # Convert input points and direction vectors to numpy arrays
         scale = np.array(self.image_layer.scale[1:])
         P1 = np.array(P1)*scale
@@ -1942,7 +1960,11 @@ class ManualTracking(QWidget):
         # Compute the shortest distance between the two lines
         distance = np.linalg.norm(Q1 - Q2)
         
-        return ( Q1 + Q2 ) /2 / scale
+        pos = ( Q1 + Q2 ) /2 / scale
+
+        closest_point = np.append([time],pos)
+
+        return closest_point
 
     def save(self):
 
