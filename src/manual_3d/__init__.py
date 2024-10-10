@@ -7,7 +7,7 @@ except ImportError:
 from ._reader import napari_get_reader
 from ._sample_data import make_sample_data
 from ._writer import write_multiple, write_single_image
-from ._widget import Parabola, Box, LoadSample, SetUpTracking, LoadTracking, ManualTracking#ExampleQWidget, ImageThreshold, threshold_autogenerate_widget, threshold_magic_widget, activate_widget
+from ._widget import Parabola, Box, LoadData, LoadVectorfield, SetUpTracking, LoadTracking, ManualTracking#ExampleQWidget, ImageThreshold, threshold_autogenerate_widget, threshold_magic_widget, activate_widget
 
 __all__ = (
     "napari_get_reader",
@@ -17,7 +17,8 @@ __all__ = (
     "change_voxel_size",
     "Parabola",
     "Box",
-    "LoadSample",
+    "LoadData",
+    "LoadVectorfield",
     "SetUpTracking",
     "LoadTracking",
     "ManualTracking",

@@ -26,10 +26,14 @@ contributions:
     - id: manual-3d.Parabola
       python_name: manual_3d:Parabola
       title: Parabola
-    # LoadSample
-    - id: manual-3d.LoadSample
-      python_name: manual_3d:LoadSample
-      title: Parabola
+    # LoadData
+    - id: manual-3d.LoadData
+      python_name: manual_3d:LoadData
+      title: LoadData
+    # LoadVectorfield
+    - id: manual-3d.LoadVectorfield
+      python_name: manual_3d:LoadVectorfield
+      title: LoadVectorfield
     # SetUpTracking
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
@@ -80,9 +84,12 @@ contributions:
     # Parabola
     - command: manual-3d.Parabola
       display_name: Parabola
-    # LoadSample
-    - command: manual-3d.LoadSample
-      display_name: LoadSample
+    # LoadData
+    - command: manual-3d.LoadData
+      display_name: LoadData
+    # LoadVectorfield
+    - command: manual-3d.LoadVectorfield
+      display_name: LoadVectorfield
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking

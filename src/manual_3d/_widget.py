@@ -390,7 +390,7 @@ class BaseSetUp(QWidget):
         except Exception as e:
             print(f"Error detecting file pattern: {e}")
 
-class LoadSample(BaseSetUp):
+class LoadData(BaseSetUp):
     def __init__(self, napari_viewer):
         super().__init__(napari_viewer)
 
@@ -399,13 +399,97 @@ class LoadSample(BaseSetUp):
         self.step_input = QSpinBox(self)
         self.step_input.setMinimum(-1)
         self.step_input.setMaximum(999999)
-        self.step_input.setValue(-1)
+        self.step_input.setValue(1)
         self.layout.addWidget(self.step_label)
         self.layout.addWidget(self.step_input)
 
         # Maximum
         self.maxproj_checkbox = QCheckBox("Max projection")
-        self.maxproj_checkbox.setChecked(True)
+        self.maxproj_checkbox.setChecked(False)
+        self.layout.addWidget(self.maxproj_checkbox)
+
+        # Steps
+        self.add_label = QLabel("Add zeros:")
+        self.add_input = QSpinBox(self)
+        self.add_input.setMinimum(-1)
+        self.add_input.setMaximum(999999)
+        self.add_input.setValue(0)
+        self.layout.addWidget(self.add_label)
+        self.layout.addWidget(self.add_input)
+
+        # Save button
+        self.exec_button = QPushButton("Load Sample")
+        self.exec_button.clicked.connect(self.exec_function)
+        self.layout.addWidget(self.exec_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def exec_function(self):
+
+        if self.maxproj_checkbox.isChecked():
+            path = self.path_input.text()
+            l = range(self.start_input.value(), self.end_input.value(), self.step_input.value())
+
+            file = self.format_input.text().format(l[0])
+            img = skimage.io.imread("{}/{}".format(path,file))
+            for i in l:
+                file = self.format_input.text().format(i)
+                img = np.maximum(skimage.io.imread("{}/{}".format(path,file)), img)
+            
+            scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+            self.viewer.add_image(img,scale=scale,colormap="red",opacity=1)
+        
+        else:
+
+            try:
+
+                # Assuming read_split_times is defined elsewhere
+                path_data = self.path_input.text()
+                start_point = self.start_input.value()
+                end_point = self.end_input.value()
+                step = self.step_input.value()
+                format_str = self.format_input.text()
+                scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+                    
+                # Load the movie/data layer
+                image = read_split_times(
+                    str(path_data),
+                    range(start_point, end_point + 1, step),
+                    format_str
+                )[0][:, :, 0, :, :]
+                    
+                if self.add_input.value() != 0:
+                    v = np.zeros_like(image[:self.add_input.value(),:,:,:])
+                    image = np.concatenate([v,image[1:,:,:,:]], axis=0)
+                
+                # Add the image layer to the viewer
+                self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(path_data)})
+
+                print("Data layer loaded successfully.")
+                
+            except Exception as e:
+                
+                print(f"Error loading data layer: {e}")
+
+        return
+
+class LoadVectorfield(BaseSetUp):
+    def __init__(self, napari_viewer):
+        super().__init__(napari_viewer)
+
+        # Steps
+        self.step_label = QLabel("Steps:")
+        self.step_input = QSpinBox(self)
+        self.step_input.setMinimum(-1)
+        self.step_input.setMaximum(999999)
+        self.step_input.setValue(1)
+        self.layout.addWidget(self.step_label)
+        self.layout.addWidget(self.step_input)
+
+        # Maximum
+        self.maxproj_checkbox = QCheckBox("Max projection")
+        self.maxproj_checkbox.setChecked(False)
         self.layout.addWidget(self.maxproj_checkbox)
 
         # Save button
@@ -418,22 +502,44 @@ class LoadSample(BaseSetUp):
 
     def exec_function(self):
 
-        path = self.path_input.text()
-        if self.step_input.value() == -1:
-            l = [0, self.end_input.value()]
-        else:
-            l = range(self.start_input.value(), self.end_input.value(), self.step_input.value())
+        if True:
 
-        file = self.format_input.text().format(l[0])
-        img = skimage.io.imread("{}/{}".format(path,file))
-        for i in l:
-            file = self.format_input.text().format(i)
-            img = np.maximum(skimage.io.imread("{}/{}".format(path,file)), img)
-        
-        scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-        self.viewer.add_image(img,scale=scale,colormap="red",opacity=1)
-        
+            # Assuming read_split_times is defined elsewhere
+            path_data = self.path_input.text()
+            start_point = self.start_input.value()
+            end_point = self.end_input.value()
+            step = self.step_input.value()
+            format_str = self.format_input.text()
+            scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+                    
+            # Load the movie/data layer
+            if not np.all(self.viewer.layers["Data Layer"].data[0,:,:,:] == 0):
+                v = np.zeros_like(self.viewer.layers["Data Layer"].data[:1,:,:,:])
+                self.viewer.layers["Data Layer"].data = np.concatenate([v,self.viewer.layers["Data Layer"].data], axis=0)
+            mask = self.viewer.layers["Data Layer"].data[1:,:,:,:] > 20
+            vectors, magnitudes = read_split_vectors(path_data, range(start_point, end_point + 1, step), mask, format_str)
+            print(vectors.shape)
+                    
+            # Add the image layer to the viewer
+            vector_layer = self.viewer.add_tracks(
+                    vectors,
+                    name="vectors",
+                    scale=scale,
+                    tail_length=1,
+                    opacity=.8,
+                    blending='translucent',
+                    properties={"magnitude":magnitudes},
+                    color_by="magnitude"
+                )
+
+            print("Vector layer loaded successfully.")
+                
+        # except Exception as e:
+                
+        #     print(f"Error loading data layer: {e}")
+
         return
+
     
 class SetUpTracking(BaseSetUp, BaseSavePath):
     def __init__(self, napari_viewer):

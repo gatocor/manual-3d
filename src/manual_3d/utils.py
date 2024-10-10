@@ -148,14 +148,14 @@ def read_split_vectors(
     path_data, times, mask=None, name_format="{}{}"
 ):
     
-    path_to_file = correct_path(path_data) + name_format.format(times[0], times[1]) + ".npy"
+    path_to_file = correct_path(path_data) + name_format.format(times[0], times[1])
     vecs = np.load(path_to_file)
     Vectors = []
     Magnitudes = []
 
     idmax = 0
     for tid, t in enumerate(times[:-1]):
-        path_to_file = correct_path(path_data) + name_format.format(times[tid], times[tid+1]) + ".npy"
+        path_to_file = correct_path(path_data) + name_format.format(times[tid], times[tid+1])
         vecs = np.load(path_to_file)
         if mask is not None:        
             keep = mask[tid, vecs[:, 0, 0].astype(int), vecs[:, 0, 1].astype(int), vecs[:, 0, 2].astype(int)]
