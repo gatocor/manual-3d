@@ -1120,7 +1120,7 @@ class ManualTracking(QWidget):
         # self.vectorcheckbox.stateChanged.connect(self.make_vector_layer)
         self.selected_point_button = QPushButton("Selection issues")
         self.layout.addWidget(self.selected_point_button)
-        self.selected_point_button.clicked.connect(self.select_point_issues)
+        self.selected_point_button.clicked.connect(self.point_selected)
 
         self.save_button = QPushButton("Save")
         self.layout.addWidget(self.save_button)
@@ -1300,11 +1300,191 @@ class ManualTracking(QWidget):
     #             "}"
     #         )
 
-    def select_point_issues(self):
+    def point_selected(self):
 
         # self.selected_point_button.setStyleSheet("")
+        if not self.tracking_active and len(self.points_layer.selected_data) > 1:
 
-        if self.tracking_active and len(self.points_layer.selected_data) == 1:
+            msg = QMessageBox()
+            msg.setWindowTitle("Several points")
+            msg.setText(f"You cannot activate a tracking with several points selected.")
+            msg.setIcon(QMessageBox.Question)
+
+            msg.exec_()
+
+        elif not self.tracking_active and len(self.points_layer.selected_data) == 1:
+
+            selected_pos = list(self.points_layer.selected_data)[0]
+            selected_point = self.points_layer.data[selected_pos] 
+            selected_time = selected_point[0]
+            selected_id = self.points_layer.properties["id"][selected_pos]
+
+            self.viewer.dims.current_step = (selected_time, *self.viewer.dims.current_step[1:])
+
+            if np.isnan(selected_id):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from selected point")
+                msg.setText("There is a point selected without id. Do you want to start a tracking from this point?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    if selected_time == 0:
+
+                        self.tracking_forward = True
+
+                        msg = QMessageBox()
+                        msg.setWindowTitle("Start from first point")
+                        msg.setText("This is the first point, we are starting a forward tracking.")
+                        msg.setIcon(QMessageBox.Question)
+
+                        # Add more than two buttons
+                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                        msg.exec_()
+
+                    elif selected_time == self.time_max:
+
+                        self.tracking_forward = False
+
+                        msg = QMessageBox()
+                        msg.setWindowTitle("Start from last point")
+                        msg.setText("This is the last point, we are starting a backward tracking.")
+                        msg.setIcon(QMessageBox.Question)
+
+                        # Add more than two buttons
+                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                        msg.exec_()
+
+                    else:
+
+                        self.question_tracking_direction()
+
+                    self.setup_active_tracking(id=None, tracking_time=selected_time)
+                    self.add_track_point(selected_point)
+                    self.update_tracking_time()
+                    self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
+                    self.jump_next()
+
+                    return
+
+                elif msg.clickedButton() == button_no:
+
+                    return
+
+            keep = self.tracking_layer.data[:,0] == selected_id
+            times = self.tracking_layer.data[keep,1]
+
+            if self.get_time() == self.track_last_time(selected_id) and self.track_length(selected_id) != 1:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from end selected point")
+                msg.setText(f"There is a point selected with tracking id {selected_id} that is the end of an existing track. Do you want to continue it?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    #Relabel future branch
+                    self.tracking_forward = True
+                    self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.jump_next()
+
+                elif msg.clickedButton() == button_no:
+
+                    return
+
+            elif self.get_time() == self.track_first_time(selected_id) and self.track_length(selected_id) != 1:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from start selected point")
+                msg.setText(f"There is a point selected with tracking id {selected_id} that is the start of an existing track. Do you want to continue it?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    #Relabel future branch
+                    self.tracking_forward = False
+                    self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.jump_next()
+
+                elif msg.clickedButton() == button_no:
+
+                    return                
+
+            elif self.track_length(selected_id) == 1:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Start from start selected point")
+                msg.setText(f"There is a point selected with tracking id {selected_id}. Do you want to continue it?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    #Relabel future branch
+                    self.question_tracking_direction()
+                    self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.jump_next()
+
+                elif msg.clickedButton() == button_no:
+
+                    return                
+
+            else:
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Bifurcation point")
+                msg.setText(f"There is a point selected with tracking id {selected_id}. This point selected is in the middle of an existing track. Do you want it to set it as a division point and start a new track?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    #Relabel future branch
+                    self.tracking_forward = True
+                    self.relabel_track(selected_point, selected_id)
+                    self.setup_active_tracking()
+                    self.add_track_point(selected_point)
+                    self.update_tracking_time()
+                    self.jump_next()
+
+                elif msg.clickedButton() == button_no:
+
+                    return
+                
+            self.check_track_end()
+
+        elif self.tracking_active and len(self.points_layer.selected_data) == 1:
 
             self.check_causality()
 
@@ -1315,7 +1495,8 @@ class ManualTracking(QWidget):
 
             if np.isnan(selected_id):
 
-                self.points_layer.properties["id"] = self.tracking_active_id
+                # self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
+                self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
                 self.add_track_point(selected_point)
                 self.update_tracking_time()
                 self.add_point_auxiliar(selected_point)
@@ -1375,16 +1556,14 @@ class ManualTracking(QWidget):
 
                 if msg.clickedButton() == button_yes:
 
+                    self.relabel_track(selected_point, selected_id)
                     self.add_track_point(selected_point)
-                    self.update_tracking_time()
-                    self.tracking_max_id += 1
-                    self.relabel_track(selected_point, self.tracking_max_id)
                     self.stop_tracking()
                 
                 self.unselect()
                 return
 
-            elif self.tracking_forward and selected_time == self.track_last_time(selected_id):
+            elif not self.tracking_forward and selected_time == self.track_last_time(selected_id):
 
                 msg = QMessageBox()
                 msg.setWindowTitle("Merge tracks")
@@ -1414,6 +1593,7 @@ class ManualTracking(QWidget):
     def track_id_reassign(self, old_id, new_id):
 
         self.tracking_layer.data[:,0][self.tracking_layer.data[:,0] == old_id] = new_id
+        self.tracking_layer.data = self.tracking_layer.data
 
     def track_first_time(self, id):
 
@@ -1422,7 +1602,11 @@ class ManualTracking(QWidget):
     def track_last_time(self, id):
 
         return np.max(self.tracking_layer.data[:,1][self.tracking_layer.data[:,0] == id])
-    
+
+    def track_length(self, id):
+
+        return len(self.tracking_layer.data[:,1][self.tracking_layer.data[:,0] == id])
+
     def check_causality(self):
 
         if self.tracking_time+1 != self.get_time() and self.tracking_forward:    
@@ -1458,9 +1642,11 @@ class ManualTracking(QWidget):
 
     def add_point_auxiliar(self, new_point):
 
+        new_point = new_point.copy()
         new_point[0] += 1
         if new_point[0] < self.time_max+1:
             self.points_layer_aux_forw.add(new_point)
+        new_point = new_point.copy()
         new_point[0] -= 2
         if new_point[0] >= 0:
             self.points_layer_aux_back.add(new_point)
@@ -1501,13 +1687,18 @@ class ManualTracking(QWidget):
             msg.setIcon(QMessageBox.Question)
 
             # Add more than two buttons
+            button_disconnect = msg.addButton("Disconnect Point", QMessageBox.ActionRole)
             button_point = msg.addButton("Remove Point", QMessageBox.ActionRole)
             button_track = msg.addButton("Remove Track", QMessageBox.ActionRole)
             button_cancel = msg.addButton("Cancel", QMessageBox.ActionRole)
 
             msg.exec_()
 
-            if msg.clickedButton() == button_point:
+            if msg.clickedButton() == button_disconnect:
+
+                self.disconnect_track_point(selected_point, selected_id)
+
+            elif msg.clickedButton() == button_point:
 
                 self.remove_track_point(selected_point, selected_id)
 
@@ -1678,160 +1869,9 @@ class ManualTracking(QWidget):
                 elif msg.clickedButton() == button_no:
                     return
 
-        if len(self.points_layer.selected_data) == 1:
+        if len(self.points_layer.selected_data) > 0:
 
-            selected_pos = list(self.points_layer.selected_data)[0]
-            selected_point = self.points_layer.data[selected_pos] 
-            selected_time = selected_point[0]
-            selected_id = self.points_layer.properties["id"][selected_pos]
-
-            self.viewer.dims.current_step = (selected_time, *self.viewer.dims.current_step[1:])
-
-            if np.isnan(selected_id):
-
-                msg = QMessageBox()
-                msg.setWindowTitle("Start from selected point")
-                msg.setText("There is a point selected without id. Do you want to start a tracking from this point?")
-                msg.setIcon(QMessageBox.Question)
-
-                # Add more than two buttons
-                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
-                button_no = msg.addButton("No", QMessageBox.ActionRole)
-
-                msg.exec_()
-
-                if msg.clickedButton() == button_yes:
-
-                    if selected_time == 0:
-
-                        self.tracking_forward = True
-
-                        msg = QMessageBox()
-                        msg.setWindowTitle("Start from first point")
-                        msg.setText("This is the first point, we are starting a forward tracking.")
-                        msg.setIcon(QMessageBox.Question)
-
-                        # Add more than two buttons
-                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
-
-                        msg.exec_()
-
-                    elif selected_time == self.time_max:
-
-                        self.tracking_forward = False
-
-                        msg = QMessageBox()
-                        msg.setWindowTitle("Start from last point")
-                        msg.setText("This is the last point, we are starting a backward tracking.")
-                        msg.setIcon(QMessageBox.Question)
-
-                        # Add more than two buttons
-                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
-
-                        msg.exec_()
-
-                    else:
-
-                        self.question_tracking_direction()
-
-                    self.setup_active_tracking(id=None, tracking_time=selected_time)
-                    self.add_track_point(selected_point)
-                    self.update_tracking_time()
-                    self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
-                    self.jump_next()
-
-                    return
-
-                elif msg.clickedButton() == button_no:
-
-                    return
-
-            keep = self.tracking_layer.data[:,0] == selected_id
-            times = self.tracking_layer.data[keep,1]
-
-            if self.get_time() == self.track_last_time(selected_id):
-
-                msg = QMessageBox()
-                msg.setWindowTitle("Start from end selected point")
-                msg.setText(f"There is a point selected with tracking id {selected_id} that is the end of an existing track. Do you want to continue it?")
-                msg.setIcon(QMessageBox.Question)
-
-                # Add more than two buttons
-                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
-                button_no = msg.addButton("No", QMessageBox.ActionRole)
-
-                msg.exec_()
-
-                if msg.clickedButton() == button_yes:
-
-                    #Relabel future branch
-                    self.tracking_forward = True
-                    self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
-                    self.jump_next()
-
-                elif msg.clickedButton() == button_no:
-
-                    return
-
-            elif self.get_time() == self.track_first_time(selected_id):
-
-                msg = QMessageBox()
-                msg.setWindowTitle("Start from start selected point")
-                msg.setText(f"There is a point selected with tracking id {selected_id} that is the start of an existing track. Do you want to continue it?")
-                msg.setIcon(QMessageBox.Question)
-
-                # Add more than two buttons
-                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
-                button_no = msg.addButton("No", QMessageBox.ActionRole)
-
-                msg.exec_()
-
-                if msg.clickedButton() == button_yes:
-
-                    #Relabel future branch
-                    self.tracking_forward = False
-                    self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
-                    self.jump_next()
-
-                elif msg.clickedButton() == button_no:
-
-                    return                
-
-            else:
-
-                msg = QMessageBox()
-                msg.setWindowTitle("Bifurcation point")
-                msg.setText(f"There is a point selected with tracking id {selected_id}. This point selected is in the middle of an existing track. Do you want it to set it as a division point and start a new track?")
-                msg.setIcon(QMessageBox.Question)
-
-                # Add more than two buttons
-                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
-                button_no = msg.addButton("No", QMessageBox.ActionRole)
-
-                msg.exec_()
-
-                if msg.clickedButton() == button_yes:
-
-                    #Relabel future branch
-                    self.tracking_forward = True
-                    self.relabel_track(selected_point, selected_id)
-                    self.setup_active_tracking()
-                    self.add_track_point(selected_point)
-                    self.update_tracking_time()
-                    self.jump_next()
-
-                elif msg.clickedButton() == button_no:
-
-                    return
-
-        elif len(self.points_layer.selected_data) > 1:
-
-            msg = QMessageBox()
-            msg.setWindowTitle("Several points")
-            msg.setText(f"You cannot activate a tracking with several points selected.")
-            msg.setIcon(QMessageBox.Question)
-
-            msg.exec_()
+            self.point_selected()
 
         else:
 
@@ -1888,6 +1928,33 @@ class ManualTracking(QWidget):
         keep_times = self.points_layer.data[:,0] > selected_time
         change = keep_ids*keep_times
         self.points_layer.properties["id"][change] = new_id
+
+    def disconnect_track_point(self, selected_point, selected_id):
+
+        selected_time = selected_point[0]
+
+        # Relabel
+        self.tracking_max_id += 1
+        keep_ids = self.tracking_layer.data[:,0] == selected_id
+        keep_times = self.tracking_layer.data[:,1] > selected_time
+        change = keep_ids*keep_times
+        self.tracking_layer.data[change,0] = self.tracking_max_id
+
+        keep_ids = self.points_layer.properties["id"] == selected_id
+        keep_times = self.points_layer.data[:,0] >= selected_time
+        change = keep_ids*keep_times
+        self.points_layer.properties["id"][change] = self.tracking_max_id
+
+        # Remove point
+        keep_ids = self.tracking_layer.data[:,0] == selected_id
+        keep_times = self.tracking_layer.data[:,1] == selected_time
+        change = ~(keep_ids*keep_times)
+        self.tracking_layer.data = self.tracking_layer.data[change,:]
+
+        keep_ids = self.points_layer.properties["id"] == self.tracking_max_id
+        keep_times = self.points_layer.data[:,0] == selected_time
+        change = (keep_ids*keep_times)
+        self.points_layer.properties["id"][change] = np.nan
 
     def remove_track_point(self, selected_point, selected_id):
 
@@ -2014,6 +2081,8 @@ class ManualTracking(QWidget):
 
             msg.exec_()
 
+            return True
+
         elif 0 >= self.tracking_time and not self.tracking_forward:
 
             self.stop_tracking()
@@ -2028,7 +2097,9 @@ class ManualTracking(QWidget):
 
             msg.exec_()
 
-        return
+            return True
+
+        return False
 
     def update_tracking_time(self):
 
