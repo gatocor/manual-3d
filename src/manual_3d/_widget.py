@@ -1069,7 +1069,8 @@ class ManualTracking(QWidget):
         self.tracking_layer = self.viewer.layers['Tracking Layer']
         self.length = len(self.image_layer.data)
         # self.points_layer.events.data.connect(self.on_point_added)
-        self.viewer.mouse_drag_callbacks.append(self.connect_point)
+        self.points_layer.events.highlight.connect(self.select_point)
+        # self.viewer.mouse_drag_callbacks.append(self.select_point)
 
         # Auxiliar connect
         self.image_layer_aux_forw = None
@@ -1120,6 +1121,10 @@ class ManualTracking(QWidget):
         # self.vectorcheckbox = QCheckBox("Debug")
         # self.layout.addWidget(self.vectorcheckbox)
         # self.vectorcheckbox.stateChanged.connect(self.make_vector_layer)
+        self.selected_point_button = QPushButton("Selection issues")
+        self.layout.addWidget(self.selected_point_button)
+        self.selected_point_button.clicked.connect(self.select_point_issues)
+
         self.save_button = QPushButton("Save")
         self.layout.addWidget(self.save_button)
         self.save_button.clicked.connect(self.save)
@@ -1131,14 +1136,9 @@ class ManualTracking(QWidget):
         self.viewer.layers["Data Layer"].opacity = 0.5
         self.viewer.layers.move_multiple(
             [
-            4,3,2,1,0,5,6
+                4,3,2,1,0,5,6
             ]
         )
-
-    def connect_point(self, *args):
-
-        if False:
-            print("Active and point selected")
 
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
@@ -1154,6 +1154,8 @@ class ManualTracking(QWidget):
             self.viewer.layers.remove(self.points_layer_aux_forw)
         if self.points_layer_aux_back is not None:
             self.viewer.layers.remove(self.points_layer_aux_back)
+
+        self.viewer.mouse_drag_callbacks.remove(self.select_point)
 
         super().hideEvent(event)
 
@@ -1221,39 +1223,8 @@ class ManualTracking(QWidget):
         # Checking causality
         if self.tracking_active:
 
-            if self.tracking_time+1 != self.get_time() and self.tracking_forward:    
-
-                reply = QMessageBox.question(
-                    self, 
-                    'Forward trajectory causality broken', 
-                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
-                    QMessageBox.Yes | QMessageBox.No, 
-                    QMessageBox.No
-                )
-
-                if reply == QMessageBox.No:
-                    self.stop_tracking()
-                    return
-                elif reply == QMessageBox.Yes:
-                    self.viewer.dims.current_step = (self.tracking_time+1, *self.viewer.dims.current_step[1:])
-                    return
-
-            elif self.tracking_time-1 != self.get_time() and not self.tracking_forward:    
-
-                reply = QMessageBox.question(
-                    self, 
-                    'Backward trajectory causality broken', 
-                    f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
-                    QMessageBox.Yes | QMessageBox.No, 
-                    QMessageBox.No
-                )
-
-                if reply == QMessageBox.No:
-                    self.stop_tracking()
-                    return
-                elif reply == QMessageBox.Yes:
-                    self.viewer.dims.current_step = (self.tracking_time-1, *self.viewer.dims.current_step[1:])
-                    return
+            if not self.check_causality():
+                return
 
         # Add point in 2D or 3D
         if self.viewer.dims.ndisplay == 2:
@@ -1298,6 +1269,7 @@ class ManualTracking(QWidget):
                 # Add closest
                 self.points_layer.data = self.points_layer.data[:-1] 
                 self.add(closest_point)
+                self.add_point_properties(self.points_layer)
                 self.update_tracks_layer_with_new_point(closest_point)
 
                 #Add auxiliar
@@ -1316,6 +1288,178 @@ class ManualTracking(QWidget):
 
         if self.tracking_active:
             self.jump_next()
+            self.unselect()
+
+    def select_point(self, *args):
+
+        if self.tracking_active and len(self.points_layer.selected_data) == 1:
+
+            self.check_causality()
+
+            selected_pos = list(self.points_layer.selected_data)[0]
+            selected_point = self.points_layer.data[selected_pos] 
+            selected_time = selected_point[0]
+            selected_id = self.points_layer.properties["id"][selected_pos]
+
+            if np.isnan(selected_id):
+
+                self.points_layer.properties["id"] = self.tracking_active_id
+                self.update_tracks_layer_with_new_point(selected_point)
+                self.add_point_auxiliar(selected_point)
+                self.unselect()
+                self.jump_next()
+
+            else:
+
+                self.selected_point_button.setStyleSheet(
+                            "QPushButton {"
+                                "background-color: red;"  # Green background
+                            "}"
+                        )
+
+    def select_point_issues(self):
+
+        self.selected_point_button.setStyleSheet("")
+
+        if self.tracking_active and len(self.points_layer.selected_data) == 1:
+
+            self.check_causality()
+
+            selected_pos = list(self.points_layer.selected_data)[0]
+            selected_point = self.points_layer.data[selected_pos] 
+            selected_time = selected_point[0]
+            selected_id = self.points_layer.properties["id"][selected_pos]
+
+            if self.tracking_forward and selected_time != self.track_first_time(selected_id):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Point with id")
+                msg.setText("You are trying to incorporate a existing point to the track that already belongs to the inner part of other track. If you want to do this, first you have to remove the id of that point.")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button = msg.addButton("Okay", QMessageBox.ActionRole)
+
+                msg.exec_()
+
+                self.unselect()
+                return
+
+            elif self.tracking_forward and selected_time == self.track_first_time(selected_id):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Merge tracks")
+                msg.setText("You  have selected a point that is the start of other track. Do you want to merge the tracks?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                reply = msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    self.update_tracks_layer_with_new_point(selected_point)
+                    self.track_id_reassign(selected_id, self.tracking_active_id)
+                    self.stop_tracking()
+
+                self.unselect()
+                return
+
+            elif not self.tracking_forward and selected_time != self.track_last_time(selected_id):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Bifurcation")
+                msg.setText("You  have selected a point that is in the middle of other track. Do you want to set a bifurcation event?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                reply = msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    self.update_tracks_layer_with_new_point(selected_point)
+                    self.tracking_max_id += 1
+                    self.relabel_track(selected_point, self.tracking_max_id)
+                    self.stop_tracking()
+                
+                self.unselect()
+                return
+
+            elif self.tracking_forward and selected_time == self.track_last_time(selected_id):
+
+                msg = QMessageBox()
+                msg.setWindowTitle("Merge tracks")
+                msg.setText("You  have selected a point that is the end of other track. Do you want to merge the tracks?")
+                msg.setIcon(QMessageBox.Question)
+
+                # Add more than two buttons
+                button_yes = msg.addButton("Yes", QMessageBox.ActionRole)
+                button_no = msg.addButton("No", QMessageBox.ActionRole)
+
+                reply = msg.exec_()
+
+                if msg.clickedButton() == button_yes:
+
+                    self.update_tracks_layer_with_new_point(selected_point)
+                    self.track_id_reassign(selected_id, self.tracking_active_id)
+                    self.stop_tracking()
+
+                self.unselect()
+                return
+
+    def unselect(self):
+
+        self.points_layer.selected_data = set()
+
+    def track_id_reassign(self, old_id, new_id):
+
+        self.tracking_layer.data[:,0][self.tracking_layer.data[:,0] == old_id] = new_id
+
+    def track_first_time(self, id):
+
+        return np.min(self.tracking_layer.data[:,1][self.tracking_layer.data[:,0] == id])
+
+    def track_last_time(self, id):
+
+        return np.min(self.tracking_layer.data[:,1][self.tracking_layer.data[:,0] == id])
+
+    def check_causality(self):
+
+        if self.tracking_time+1 != self.get_time() and self.tracking_forward:    
+            reply = QMessageBox.question(
+                self, 
+                'Forward trajectory causality broken', 
+                f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                self.stop_tracking()
+                return False
+            elif reply == QMessageBox.Yes:
+                self.viewer.dims.current_step = (self.tracking_time+1, *self.viewer.dims.current_step[1:])
+                return False
+        elif self.tracking_time-1 != self.get_time() and not self.tracking_forward:    
+            reply = QMessageBox.question(
+                self, 
+                'Backward trajectory causality broken', 
+                f"You are tracking and the time you are adding a point is not the immediate next point of the current tracking (last was {self.tracking_time}, current {self.get_time()}). Maybe you have changed the time and not gone back to the current tracking time point. Do you want to continue tracking?",
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                self.stop_tracking()
+                return False
+            elif reply == QMessageBox.Yes:
+                self.viewer.dims.current_step = (self.tracking_time-1, *self.viewer.dims.current_step[1:])
+                return False
+
+        return True
 
     def add_point_auxiliar(self, new_point):
 
@@ -1812,9 +1956,16 @@ class ManualTracking(QWidget):
 
         self.start_tracking_button.setStyleSheet("")
 
-        self.points_layer.selected_data = []
+        self.unselect()
         self.point1_angle = None
         self.point2_angle = None
+
+        self.viewer.layers["Auxiliar Backward Tracking Points"].visible = False
+        self.viewer.layers["Auxiliar Backward Image Layer"].visible = False
+        self.viewer.layers["Auxiliar Forward Tracking Points"].visible = False
+        self.viewer.layers["Auxiliar Forward Image Layer"].visible = False
+
+        self.point1 = None
 
         return
 
