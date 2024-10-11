@@ -34,6 +34,10 @@ contributions:
     - id: manual-3d.LoadVectorfield
       python_name: manual_3d:LoadVectorfield
       title: LoadVectorfield
+    # MakeMovie
+    - id: manual-3d.MakeMovie
+      python_name: manual_3d:MakeMovie
+      title: MakeMovie
     # SetUpTracking
     - id: manual-3d.SetUpTracking
       python_name: manual_3d:SetUpTracking
@@ -90,6 +94,9 @@ contributions:
     # LoadVectorfield
     - command: manual-3d.LoadVectorfield
       display_name: LoadVectorfield
+    # MakeMovie
+    - command: manual-3d.MakeMovie
+      display_name: MakeMovie
     # SetUpTracking
     - command: manual-3d.SetUpTracking
       display_name: SetUpTracking

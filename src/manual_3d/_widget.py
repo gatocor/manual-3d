@@ -48,6 +48,9 @@ import re
 import json
 import inspect
 import skimage
+import imageio
+import shutil
+
 
 if TYPE_CHECKING:
     import napari
@@ -214,6 +217,9 @@ class BaseSavePath(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
 
+        # Create the layout
+        self.layout = QVBoxLayout()
+
         # Folder input for storing the JSON file
         self.folder_label = QLabel("Path to where to save project:")
         self.folder_input = QLineEdit(self)
@@ -243,6 +249,109 @@ class BaseSavePath(QWidget):
     def exec_function(self):
         print("Empty function")
         return
+    
+class MakeMovie(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Folder input for storing the JSON file
+        self.folder_label = QLabel("Path to where to save movie:")
+        self.folder_input = QLineEdit(self)
+        self.browse_folder_button = QPushButton("Browse Folder")
+        self.browse_folder_button.clicked.connect(self.browse_json_folder)
+        self.layout.addWidget(self.folder_label)
+        self.layout.addWidget(self.folder_input)
+        self.layout.addWidget(self.browse_folder_button)
+
+        # Name Movie
+        self.movie_label = QLabel("Name movie:")
+        self.movie_input = QLineEdit(self)
+        self.movie_input.setText("movie.mp4")
+        self.layout.addWidget(self.movie_label)
+        self.layout.addWidget(self.movie_input)
+
+        # Start and end points
+        self.start_label = QLabel("Start Point:")
+        self.start_input = QSpinBox(self)
+        self.start_input.setMinimum(0)
+        self.start_input.setMaximum(999999)
+        self.end_label = QLabel("End Point:")
+        self.end_input = QSpinBox(self)
+        self.end_input.setMinimum(0)
+        self.end_input.setMaximum(999999)
+        try:
+            self.end_input.setValue(self.viewer.layers["Data Layer"].data.shape[0]-1)
+        except:
+            None
+        self.layout.addWidget(self.start_label)
+        self.layout.addWidget(self.start_input)
+        self.layout.addWidget(self.end_label)
+        self.layout.addWidget(self.end_input)
+
+        # Start and end points
+        self.fps_label = QLabel("Start Point:")
+        self.fps_input = QSpinBox(self)
+        self.fps_input.setMinimum(1)
+        self.fps_input.setMaximum(20)
+        self.fps_input.setValue(5)
+        self.layout.addWidget(self.fps_label)
+        self.layout.addWidget(self.fps_input)
+
+        # Save button
+        self.exec_button = QPushButton("Make movie")
+        self.exec_button.clicked.connect(self.exec_function)
+        self.layout.addWidget(self.exec_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def browse_json_folder(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.folder_input.setText(folder_path)
+
+    def exec_function(self):
+        print("Empty function")
+
+        save_path = self.folder_input.text()
+        save_tmp_path = "{}/{}".format(save_path, "/_tmp_movie/")
+        output_movie_path = "{}/{}".format(self.folder_input.text(),self.movie_input.text())
+        fps = self.fps_input.value()
+
+        try:
+            os.mkdir(save_tmp_path)
+        except:
+            None
+
+        frame_filenames = []
+
+        for t in range(self.start_input.value(), self.end_input.value()+1):
+            self.viewer.dims.set_current_step(0, t)  # Set the time axis
+            
+            # Save the screenshot of the current frame
+            screenshot_path = os.path.join(save_tmp_path, f"frame_{t:03d}.png")
+            self.viewer.screenshot(screenshot_path)  # Capture screenshot
+            frame_filenames.append(screenshot_path)  # Keep track of the saved frame filenames
+
+        # Create a movie (GIF or MP4) using imageio from the captured frames
+        with imageio.get_writer(output_movie_path) as writer:
+            for filename in frame_filenames:
+                image = imageio.imread(filename)
+                writer.append_data(image)
+
+        shutil.rmtree(save_tmp_path)
+
+        print("Movie succesfully generated!")
+
+        return
+
 class BaseSetUp(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
