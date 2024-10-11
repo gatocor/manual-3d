@@ -1201,12 +1201,12 @@ class ManualTracking(QWidget):
             self.tracking_max_id = 0
         else:
             self.tracking_max_id = np.max(self.viewer.layers['Tracking Layer'].data,axis=0)[0]
-        self.start_tracking_button = QPushButton("Start Tracking")
+        self.start_tracking_button = QPushButton("Start Tracking (Shift+T)")
         self.layout.addWidget(self.start_tracking_button)
-        self.start_tracking_button.clicked.connect(self.new_tracking)
-        self.stop_tracking_button = QPushButton("Stop Tracking")
-        self.layout.addWidget(self.stop_tracking_button)
-        self.stop_tracking_button.clicked.connect(self.stop_tracking)
+        self.start_tracking_button.clicked.connect(self.switch_tracking)
+        # self.stop_tracking_button = QPushButton("Stop Tracking")
+        # self.layout.addWidget(self.stop_tracking_button)
+        # self.stop_tracking_button.clicked.connect(self.stop_tracking)
 
         # Jump Next
         self.jump_next_checkBox = QCheckBox("Jump automatically to next image.")
@@ -1224,7 +1224,7 @@ class ManualTracking(QWidget):
         # self.vectorcheckbox = QCheckBox("Debug")
         # self.layout.addWidget(self.vectorcheckbox)
         # self.vectorcheckbox.stateChanged.connect(self.make_vector_layer)
-        self.selected_point_button = QPushButton("Selection issues")
+        self.selected_point_button = QPushButton("Selection (Shift+S)")
         self.layout.addWidget(self.selected_point_button)
         self.selected_point_button.clicked.connect(self.point_selected)
 
@@ -1243,6 +1243,10 @@ class ManualTracking(QWidget):
             ]
         )
 
+        # Bindings
+        self.viewer.bind_key('Shift+T', self.switch_tracking)
+        self.viewer.bind_key('Shift+S', self.point_selected)
+
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
         if self.points_layer is not None:
@@ -1258,7 +1262,17 @@ class ManualTracking(QWidget):
         if self.points_layer_aux_back is not None:
             self.viewer.layers.remove(self.points_layer_aux_back)
 
+        # Unbinding
+        self.viewer.bind_key('Shift+S', None)
+        self.viewer.bind_key('Shift+T', None)
+
         super().hideEvent(event)
+
+    def switch_tracking(self, *args):
+        if self.tracking_active:
+            self.stop_tracking()
+        else:
+            self.new_tracking()
 
     def process_image_layer_aux(self):
         """Process the image layer by adding an initial time of zeros and removing the last image, using a memory-efficient view."""
@@ -1406,7 +1420,7 @@ class ManualTracking(QWidget):
     #             "}"
     #         )
 
-    def point_selected(self):
+    def point_selected(self,*args):
 
         # self.selected_point_button.setStyleSheet("")
         if not self.tracking_active and len(self.points_layer.selected_data) > 1:
@@ -2131,9 +2145,10 @@ class ManualTracking(QWidget):
             self.viewer.layers["Auxiliar Forward Tracking Points"].visible = False
             self.viewer.layers["Auxiliar Forward Image Layer"].visible = False
 
+        self.start_tracking_button.setText("Stop Tracking (Shift+T)")
         self.start_tracking_button.setStyleSheet(
                     "QPushButton {"
-                        "background-color: green;"  # Green background
+                        "background-color: red;"  # Green background
                     "}"
                 )
         
@@ -2147,6 +2162,7 @@ class ManualTracking(QWidget):
         self.tracking_active = False
         self.tracking_active_id = np.nan
 
+        self.start_tracking_button.setText("Start Tracking (Shift+T)")
         self.start_tracking_button.setStyleSheet("")
 
         self.unselect()
