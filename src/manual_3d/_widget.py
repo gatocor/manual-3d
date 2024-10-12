@@ -50,7 +50,7 @@ import inspect
 import skimage
 import imageio
 import shutil
-from scipy.ndimage import gaussian_filter, minimum_filter, label
+from scipy.ndimage import gaussian_filter, maximum_filter, label
 from scipy.spatial.distance import cdist
 
 
@@ -1338,16 +1338,18 @@ class ManualTracking(QWidget):
         self.layout.addWidget(self.automatic)
         self.radius_label = QLabel("Radius:")
         self.radius_input = QDoubleSpinBox(self)
-        self.radius_input.setDecimals(3)
-        self.radius_input.setValue(100)
-        self.radius_input.setSingleStep(0.001)
+        self.radius_input.setDecimals(0)
+        self.radius_input.setMaximum(99999)
+        self.radius_input.setValue(150)
+        self.radius_input.setSingleStep(5)
         self.layout.addWidget(self.radius_label)
         self.layout.addWidget(self.radius_input)
         self.sigma_label = QLabel("Sigma:")
         self.sigma_input = QDoubleSpinBox(self)
-        self.sigma_input.setDecimals(3)
-        self.sigma_input.setValue(10)
-        self.sigma_input.setSingleStep(0.001)
+        self.sigma_input.setDecimals(1)
+        self.sigma_input.setMaximum(99999)
+        self.sigma_input.setValue(150)
+        self.sigma_input.setSingleStep(1)
         self.layout.addWidget(self.sigma_label)
         self.layout.addWidget(self.sigma_input)      
 
@@ -1381,7 +1383,7 @@ class ManualTracking(QWidget):
         # Bindings
         self.viewer.bind_key('Shift+T', self.switch_tracking, overwrite=True)
         self.viewer.bind_key('Shift+S', self.point_selected, overwrite=True)
-        self.viewer.bind_key('Shift+A', self.accept_prediction, overwrite=True)
+        self.viewer.bind_key('Shift+Z', self.accept_prediction, overwrite=True)
 
     def hideEvent(self, event):
         """Triggered when the widget is hidden, disconnect the point added callback if active."""
@@ -1403,7 +1405,7 @@ class ManualTracking(QWidget):
         # Unbinding
         self.viewer.bind_key('Shift+T', None)
         self.viewer.bind_key('Shift+S', None)
-        self.viewer.bind_key('Shift+A', None)
+        self.viewer.bind_key('Shift+Z', None)
 
         super().hideEvent(event)
 
@@ -1463,58 +1465,55 @@ class ManualTracking(QWidget):
         else:
             print("Points Layer not found in the viewer.")
 
-    def find_closest_minimum_in_boundary(self, point):
+    def find_closest_maximum_in_boundary(self, point):
         """
-        Smooth the image using an anisotropic Gaussian filter, then find the closest local minimum 
+        Smooth the image using an anisotropic Gaussian filter, then find the closest local maximum 
         within a specific boundary from a given point.
         
-        :param image: 3D numpy array representing the image.
-        :param point: A tuple (x, y, z) representing the coordinates of the point.
-        :param boundary_radius: The radius around the point within which to search for local minima.
-        :param sigma: A tuple of standard deviations for the Gaussian kernel along each axis (anisotropic smoothing).
-        :return: The coordinates of the closest minimum within the boundary.
+        :param point: A tuple (t, z, y, x) representing the coordinates of the point.
+        :return: The coordinates of the closest maximum within the boundary.
         """
         shape = self.image_layer.data.shape
-        boundary_radius = np.array(self.scale)*self.radius_input.value()
-        sigma = np.array(self.scale)*self.sigma_input.value()
+        boundary_radius = np.array(self.scale) * self.radius_input.value()
+        sigma = np.array(self.scale) * self.sigma_input.value()
         
         # Define the boundary limits around the point
         t, z, y, x = tuple(point)
-        print((t, z, y, x))
         x_min, x_max = int(max(x - boundary_radius[2], 0)), int(min(x + boundary_radius[2], shape[3] - 1))
         y_min, y_max = int(max(y - boundary_radius[1], 0)), int(min(y + boundary_radius[1], shape[2] - 1))
         z_min, z_max = int(max(z - boundary_radius[0], 0)), int(min(z + boundary_radius[0], shape[1] - 1))
         
         # Extract the subvolume within the boundary
-        # Apply anisotropic Gaussian smoothing to the image
         image = self.image_layer.data[self.get_time(), z_min:z_max + 1, y_min:y_max + 1, x_min:x_max + 1]
+        
+        # Apply anisotropic Gaussian smoothing to the image
         subvolume = gaussian_filter(image, sigma=sigma)
         
-        # Create a local minimum mask in the subvolume
-        local_minima = minimum_filter(subvolume, size=3) == subvolume
+        # Find local maxima in the subvolume using peak_local_max
+        maxima_coords_subvolume = peak_local_max(subvolume, min_distance=10, threshold_abs=None)
+        # print(maxima_coords_subvolume)
         
-        # Label connected components of the local minima in the subvolume
-        labeled_minima, num_features = label(local_minima)
+        # if len(maxima_coords_subvolume) == 0:
+        #     return None  # No maxima found
         
-        # Get coordinates of all local minima within the subvolume
-        minima_coords_subvolume = np.argwhere(labeled_minima)
+        # # Adjust the maxima coordinates to match the full image coordinates
+        maxima_coords = maxima_coords_subvolume + np.array([z_min, y_min, x_min])
+        # print(maxima_coords)
         
-        if len(minima_coords_subvolume) == 0:
-            return
+        # # Compute Euclidean distances from the given point to all local maxima within the boundary
+        # distances = cdist([point[1:]], maxima_coords)  # Only compare z, y, x (ignore time dimension)
         
-        # Adjust the minima coordinates to match the full image coordinates
-        minima_coords = minima_coords_subvolume + np.array([z_min, y_min, x_min])
+        # # Find the index of the closest local maximum
+        # closest_max_idx = np.argmin(distances)
         
-        # Compute Euclidean distances from the given point to all local minima within the boundary
-        distances = cdist([point[1:]], minima_coords)
-        
-        # Find the index of the closest local minimum
-        print(minima_coords)
-        closest_min_idx = np.argmin(distances)
-        
-        self.prediction_layer.data = np.array([self.get_time(), minima_coords[closest_min_idx][0], minima_coords[closest_min_idx][1], minima_coords[closest_min_idx][2]]).reshape(1,-1)
+        # # Save the prediction
+        # self.prediction_layer.data = np.array([self.get_time(), maxima_coords[closest_max_idx][0], maxima_coords[closest_max_idx][1], maxima_coords[closest_max_idx][2]]).reshape(1, -1)
 
-        return 
+        print(maxima_coords)
+        self.prediction_layer.data = np.array([self.get_time()*np.zeros_like(maxima_coords[:,0]), maxima_coords[:,0], maxima_coords[:,1], maxima_coords[:,2]]).reshape(len(maxima_coords[:,2]),4)
+
+        return #maxima_coords[closest_max_idx]  # Return the coordinates of the closest maximum
+
 
     def accept_prediction(self):
     
@@ -1524,7 +1523,7 @@ class ManualTracking(QWidget):
             # self.add_track_point(self.point_prediction_layer.data[0])
             # self.update_tracking_time()
             # self.jump_next()
-            # self.find_closest_minimum_in_boundary(self.point_prediction_layer.data[0])
+            # self.find_closest_maximum_in_boundary(self.point_prediction_layer.data[0])
             # self.unselect()
 
     def add_points(self, new_point):
@@ -1613,7 +1612,7 @@ class ManualTracking(QWidget):
 
         if self.tracking_active:
             self.jump_next()
-            self.find_closest_minimum_in_boundary(new_point)
+            self.find_closest_maximum_in_boundary(new_point)
             self.unselect()
 
     # def select_point(self, *args):
