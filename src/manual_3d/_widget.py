@@ -52,7 +52,8 @@ import imageio
 import shutil
 from scipy.ndimage import gaussian_filter, maximum_filter, label
 from scipy.spatial.distance import cdist
-
+from .predictor import *
+from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
     import napari
@@ -1267,7 +1268,7 @@ class ManualTracking(QWidget):
 
         # Add checkbox for manual tracking activation/deactivation
         self.rotate_3D = QCheckBox("3D automatic rotation")
-        self.rotate_3D.setChecked(True)
+        self.rotate_3D.setChecked(False)
         self.layout.addWidget(self.rotate_3D)
         self.current_angle = None
         self.target_angle = None
@@ -1285,6 +1286,7 @@ class ManualTracking(QWidget):
         self.points_layer.remove_selected = self.remove
         self.tracking_layer = self.viewer.layers['Tracking Layer']
         self.time_max = len(self.image_layer.data)-1
+        self.scale = self.image_layer.scale[1:]
 
         # Auxiliar connect
         self.image_layer_aux_forw = None
@@ -1330,30 +1332,11 @@ class ManualTracking(QWidget):
         self.layout.addWidget(self.debugging)
 
         # Automatic prediction
-        self.viewer.add_points([[0,0,0,0]], size=8, face_color='blue', symbol='square', name="Prediction", scale=self.viewer.layers['Data Layer'].scale, blending="translucent_no_depth", visible=True)
-        self.prediction_layer =  self.viewer.layers['Prediction']
-        print(self.prediction_layer.data.shape)
+        self.automatic_widget = None
         self.automatic = QCheckBox("Automatic prediction")
-        self.automatic.setChecked(True)
+        self.automatic.setChecked(False)
         self.layout.addWidget(self.automatic)
-        self.radius_label = QLabel("Radius:")
-        self.radius_input = QDoubleSpinBox(self)
-        self.radius_input.setDecimals(0)
-        self.radius_input.setMaximum(99999)
-        self.radius_input.setValue(150)
-        self.radius_input.setSingleStep(5)
-        self.layout.addWidget(self.radius_label)
-        self.layout.addWidget(self.radius_input)
-        self.sigma_label = QLabel("Sigma:")
-        self.sigma_input = QDoubleSpinBox(self)
-        self.sigma_input.setDecimals(1)
-        self.sigma_input.setMaximum(99999)
-        self.sigma_input.setValue(150)
-        self.sigma_input.setSingleStep(1)
-        self.layout.addWidget(self.sigma_label)
-        self.layout.addWidget(self.sigma_input)      
-
-        self.scale = (2,0.347,0.347)
+        self.automatic.toggled.connect(self.switch_automatic)
 
         self.viewer.layers.selection.active = self.viewer.layers['Points Layer']
 
@@ -1399,8 +1382,10 @@ class ManualTracking(QWidget):
             self.viewer.layers.remove(self.points_layer_aux_forw)
         if self.points_layer_aux_back is not None:
             self.viewer.layers.remove(self.points_layer_aux_back)
-        if self.prediction_layer is not None:
-            self.viewer.layers.remove(self.prediction_layer)
+
+        if self.automatic_widget != None:
+            self.automatic_widget.hide()
+            self.automatic_widget = None
 
         # Unbinding
         self.viewer.bind_key('Shift+T', None)
@@ -1414,6 +1399,14 @@ class ManualTracking(QWidget):
             self.stop_tracking()
         else:
             self.new_tracking()
+
+    def switch_automatic(self):
+        if self.automatic.isChecked():
+            self.automatic_widget = AutomaticPredictionAI(self.viewer, self)
+            self.viewer.window.add_dock_widget(self.automatic_widget)
+        else:
+            self.automatic_widget.hide()
+            self.automatic_widget = None
 
     def process_image_layer_aux(self):
         """Process the image layer by adding an initial time of zeros and removing the last image, using a memory-efficient view."""
@@ -1610,10 +1603,24 @@ class ManualTracking(QWidget):
 
                 new_point = closest_point
 
+        if self.automatic.isChecked():
+
+            if self.automatic_widget.update_button.isChecked() and np.any(self.last_point != None):
+                self.automatic_widget.model.train_step2(
+                    self.image_layer.data, 
+                    self.last_point, new_point[1:], 
+                    self.tracking_forward, 
+                    lr=self.automatic_widget.augmentation_input.value(),
+                    num_translations=int(self.automatic_widget.augmentation_input.value()))
+    
+            self.automatic_widget.model.predict(self.image_layer.data,new_point, self.tracking_forward, self.automatic_widget.prediction_layer)
+
         if self.tracking_active:
             self.jump_next()
-            self.find_closest_maximum_in_boundary(new_point)
             self.unselect()
+
+        self.last_point = new_point.copy()
+
 
     # def select_point(self, *args):
 
@@ -1697,6 +1704,7 @@ class ManualTracking(QWidget):
                     self.add_track_point(selected_point)
                     self.update_tracking_time()
                     self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
+                    self.last_point = selected_point.copy()
                     self.jump_next()
 
                     return
@@ -1726,6 +1734,7 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.tracking_forward = True
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.last_point = selected_point.copy()
                     self.jump_next()
 
                 elif msg.clickedButton() == button_no:
@@ -1750,6 +1759,7 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.tracking_forward = False
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.last_point = selected_point.copy()
                     self.jump_next()
 
                 elif msg.clickedButton() == button_no:
@@ -1774,6 +1784,7 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.question_tracking_direction()
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
+                    self.last_point = selected_point.copy()
                     self.jump_next()
 
                 elif msg.clickedButton() == button_no:
@@ -2213,11 +2224,13 @@ class ManualTracking(QWidget):
                 msg.exec_()
 
                 self.tracking_forward = True
+                self.last_point = None
                 self.setup_active_tracking()
 
             elif self.time_max > self.get_time():
 
                 self.question_tracking_direction()
+                self.last_point = None
                 self.setup_active_tracking()
 
             else:
@@ -2233,6 +2246,7 @@ class ManualTracking(QWidget):
                 msg.exec_()
 
                 self.tracking_forward = False
+                self.last_point = None
                 self.setup_active_tracking()
 
             return
@@ -2552,6 +2566,306 @@ class ManualTracking(QWidget):
 
         # Create empty trackings.npy (for storing tracking layers later)
         np.save(f"{self.tracking_layer.metadata['path']}/trackings.npy", self.tracking_layer.data)
+
+class SetUpAutomaticPredictionAI(QDialog):
+    def __init__(self, napari_viewer, model):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+        self.model = model
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.folder_save_label = QLabel("Path to Model Folder:")
+        self.folder_save = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.folder_save_browse)
+        self.layout.addWidget(self.folder_save_label)
+        self.layout.addWidget(self.folder_save)
+        self.layout.addWidget(self.browse_button)
+
+        # Radius
+        self.radius_label = QLabel("Radius:")
+        self.radius_input = QDoubleSpinBox(self)
+        self.radius_input.setDecimals(3)
+        self.radius_input.setMaximum(99999)
+        self.radius_input.setValue(20)
+        self.radius_input.setSingleStep(1)
+        self.layout.addWidget(self.radius_label)
+        self.layout.addWidget(self.radius_input)
+
+        # Pretrain
+        self.pretrain = QCheckBox("Pretrain with loaded layers")
+        self.layout.addWidget(self.pretrain)
+        # self.folder_train_label = QLabel("Pretrain with existing tracking project:")
+        # self.folder_train = QLineEdit(self)
+        # self.folder_train.setText("")
+        # self.browse_folder_button = QPushButton("Browse Folder")
+        # self.browse_folder_button.clicked.connect(self.folder_train_browse)
+        # self.layout.addWidget(self.folder_train_label)
+        # self.layout.addWidget(self.folder_train)
+        # self.layout.addWidget(self.browse_folder_button)
+
+        # Training parameters
+        self.epochs_label = QLabel("Epochs:")
+        self.epochs_input = QDoubleSpinBox(self)
+        self.epochs_input.setDecimals(0)
+        self.epochs_input.setValue(10)
+        self.epochs_input.setMaximum(10000)
+        self.epochs_input.setSingleStep(1)
+        self.lr_label = QLabel("Learning Rate:")
+        self.lr_input = QDoubleSpinBox(self)
+        self.lr_input.setDecimals(5)
+        self.lr_input.setValue(0.001)
+        self.lr_input.setSingleStep(0.0001)
+        self.layout.addWidget(self.epochs_label)
+        self.layout.addWidget(self.epochs_input)
+        self.layout.addWidget(self.lr_label)
+        self.layout.addWidget(self.lr_input)
+
+        # Save button
+        self.save_button = QPushButton("Create prediction model")
+        self.save_button.clicked.connect(self.save)
+        self.layout.addWidget(self.save_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def folder_save_browse(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.folder_save.setText(folder_path)
+
+    def folder_train_browse(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.folder_train.setText(folder_path)
+
+    def save(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+                
+        radius = np.round(self.radius_input.value() / np.array(self.model.tracking.scale)).astype(int)
+        shape = radius*2+1
+
+        with open("{}/settings.json".format(self.folder_save.text()), 'w') as settings_file:
+            json.dump({"shape":[int(i) for i in shape]}, settings_file, indent=4)
+
+        self.model.folder_save = self.folder_save.text()
+        self.model.model = Dual3DImageNet(shape)
+
+        self.model.model.save(self.folder_save.text())
+        if self.pretrain.isChecked():
+            save_chunks_and_coords_from_tracks(
+                self.viewer.layers["Data Layer"].data,
+                self.viewer.layers["Tracking Layer"].data,
+                radius,
+                self.folder_save.text()
+            )
+            dataset = ImagePointDataset(self.folder_save.text())
+            dataset_test = ImagePointDataset(self.folder_save.text(), test=True)
+            # loader = DataLoader(
+            #     dataset,               # Your custom dataset instance
+            #     batch_size=1,         # Batch size (adjust based on your GPU/CPU memory)
+            #     shuffle=True,          # Shuffle data (typically done for training)
+            #     num_workers=4,         # Number of parallel workers for loading data
+            #     pin_memory=True,       # If you're using a GPU, this will speed up memory transfer
+            #     prefetch_factor=2      # Preload batches for better performance (optional)
+            # )
+            # loader_test = DataLoader(
+            #     dataset_test,               # Your custom dataset instance
+            #     batch_size=1,         # Batch size (adjust based on your GPU/CPU memory)
+            #     shuffle=True,          # Shuffle data (typically done for training)
+            #     num_workers=4,         # Number of parallel workers for loading data
+            #     pin_memory=True,       # If you're using a GPU, this will speed up memory transfer
+            #     prefetch_factor=2      # Preload batches for better performance (optional)
+            # )
+            self.model.model.train_model(dataset, dataset_test, num_epochs=int(self.epochs_input.value()), lr=self.lr_input.value())
+
+            self.model.model.save(self.folder_save.text())
+
+        self.accept()
+
+class LoadAutomaticPredictionAI(QDialog):
+    def __init__(self, napari_viewer, model):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+        self.model = model
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.folder_load_label = QLabel("Path to Model Folder:")
+        self.folder_load = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.folder_load_browse)
+        self.layout.addWidget(self.folder_load_label)
+        self.layout.addWidget(self.folder_load)
+        self.layout.addWidget(self.browse_button)
+
+        # Load button
+        self.load_button = QPushButton("Create prediction model")
+        self.load_button.clicked.connect(self.load)
+        self.layout.addWidget(self.load_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def folder_load_browse(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.folder_load.setText(folder_path)
+
+    def load(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+        
+        with open("{}/settings.json".format(self.folder_load.text()), 'r') as f:
+            settings = json.load(f)
+
+        shape = settings["shape"]
+        print(shape)
+        self.model.model = Dual3DImageNet(shape)
+        self.model.folder_save = self.folder_load.text()
+        self.model.model.load(self.folder_load.text())
+        
+
+        self.accept()
+
+class AutomaticPredictionAI(QWidget):
+
+    def __init__(self, viewer, tracking):
+        super().__init__()
+
+        self.viewer = viewer
+        self.tracking = tracking
+        self.model = None
+        self.folder_save = None
+
+        msg = QMessageBox()
+        msg.setWindowTitle("Use Prediction Model")
+        msg.setText("Choose if to create or load a model.")
+        msg.setIcon(QMessageBox.Question)
+
+        # Add more than two buttons
+        button_create = msg.addButton("Create one", QMessageBox.ActionRole)
+        button_load = msg.addButton("Load one", QMessageBox.ActionRole)
+
+        msg.exec_()
+
+        if msg.clickedButton() == button_create:    
+            create_tracking_dialog = SetUpAutomaticPredictionAI(viewer, self)
+            create_tracking_dialog.exec_()
+        elif msg.clickedButton() == button_load:
+            create_tracking_dialog = LoadAutomaticPredictionAI(viewer, self)
+            create_tracking_dialog.exec_()
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        self.viewer.add_points(np.zeros([0,4]), size=8, face_color='blue', symbol='square', name="Prediction", scale=self.viewer.layers['Data Layer'].scale, blending="translucent_no_depth", visible=True)
+        self.prediction_layer =  self.viewer.layers['Prediction']
+
+        self.predict_label = QLabel("Predict:")
+        self.predict_input = QDoubleSpinBox(self)
+        self.predict_input.setDecimals(0)
+        self.predict_input.setMinimum(0)
+        self.predict_input.setMaximum(99999)
+        self.predict_input.setValue(1)
+        self.predict_input.setSingleStep(1)
+        self.layout.addWidget(self.predict_label)
+        self.layout.addWidget(self.predict_input)
+
+        self.lr_label = QLabel("Learning rate:")
+        self.lr_input = QDoubleSpinBox(self)
+        self.lr_input.setDecimals(5)
+        self.lr_input.setMinimum(0)
+        self.lr_input.setMaximum(1)
+        self.lr_input.setValue(0.001)
+        self.lr_input.setSingleStep(1)
+        self.layout.addWidget(self.lr_label)
+        self.layout.addWidget(self.lr_input)
+
+        # Online updating button
+        self.update_button = QCheckBox("Online updating")
+        self.layout.addWidget(self.update_button)
+
+        self.augmentation_label = QLabel("N Data Augmentations:")
+        self.augmentation_input = QDoubleSpinBox(self)
+        self.augmentation_input.setDecimals(0)
+        self.augmentation_input.setMinimum(0)
+        self.augmentation_input.setMaximum(100)
+        self.augmentation_input.setValue(0)
+        self.augmentation_input.setSingleStep(1)
+        self.layout.addWidget(self.augmentation_label)
+        self.layout.addWidget(self.augmentation_input)
+
+        # Save button
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.save)
+        self.layout.addWidget(self.save_button)
+
+        self.setLayout(self.layout)
+
+    def hideEvent(self, event):
+
+        if self.tracking.automatic_widget != None:
+            self.tracking.automatic_widget = None
+
+        if self.prediction_layer is not None:
+            self.viewer.layers.remove(self.prediction_layer)
+
+        super().hideEvent(event)
+
+    def save(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+                
+        self.model.save(self.folder_save)
+class AutomaticPredictionClassic(QWidget):
+
+    def __init__(self, viewer, tracking):
+        super().__init__()
+
+        self.viewer = viewer
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        self.viewer.add_points([[0,0,0,0]], size=8, face_color='blue', symbol='square', name="Prediction", scale=self.viewer.layers['Data Layer'].scale, blending="translucent_no_depth", visible=True)
+        self.prediction_layer =  self.viewer.layers['Prediction']
+        self.radius_label = QLabel("Radius:")
+        self.radius_input = QDoubleSpinBox(self)
+        self.radius_input.setDecimals(0)
+        self.radius_input.setMaximum(99999)
+        self.radius_input.setValue(150)
+        self.radius_input.setSingleStep(5)
+        self.layout.addWidget(self.radius_label)
+        self.layout.addWidget(self.radius_input)
+        self.sigma_label = QLabel("Sigma:")
+        self.sigma_input = QDoubleSpinBox(self)
+        self.sigma_input.setDecimals(1)
+        self.sigma_input.setMaximum(99999)
+        self.sigma_input.setValue(150)
+        self.sigma_input.setSingleStep(1)
+        self.layout.addWidget(self.sigma_label)
+        self.layout.addWidget(self.sigma_input)      
+
+        self.scale = (2,0.347,0.347)
+
+        self.setLayout(self.layout)
 
 # Napari plugin function
 def napari_experimental_provide_dock_widget():
