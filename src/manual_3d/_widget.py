@@ -44,7 +44,6 @@ from .utils import *
 from scipy.ndimage import gaussian_filter
 from skimage.feature import peak_local_max
 import napari
-import re
 import json
 import inspect
 import skimage
@@ -52,8 +51,7 @@ import imageio
 import shutil
 from scipy.ndimage import gaussian_filter, maximum_filter, label
 from scipy.spatial.distance import cdist
-from .predictor import *
-from torch.utils.data import DataLoader
+from .predictorVectorfield import *
 
 if TYPE_CHECKING:
     import napari
@@ -428,79 +426,13 @@ class BaseSetUp(QWidget):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
         if folder_path:
             self.path_input.setText(folder_path)
-            self.count_files_in_folder(folder_path)
-            self.detect_file_pattern(folder_path)
-
-    def count_files_in_folder(self, folder_path):
-        """Count the number of files in the selected folder and set the start and end points."""
-        try:
-            file_list = os.listdir(folder_path)
-            self.file_count = len(file_list)
-        except Exception as e:
-            print(f"Error counting files: {e}")
-
-    def detect_file_pattern(self, folder_path):
-        """Detect the file naming pattern, start and end points, and suggest it as the format."""
-        try:
-            file_list = os.listdir(folder_path)
-            file_list = [f for f in file_list if os.path.isfile(os.path.join(folder_path, f))]
-            file_list.sort()  # Ensure the files are sorted correctly
-
-            if len(file_list) < 2:
-                return  # We need at least two files to detect a pattern
-
-            # Prepare to capture numeric patterns and invalid files
-            num_pattern = re.compile(r'\d+')
-            valid_files = []
-            numeric_values = []
-            format_str = None
-
-            for file_name in file_list:
-                match = num_pattern.search(file_name)
-                if match:
-                    valid_files.append(file_name)
-                    numeric_values.append(int(match.group(0)))
-                else:
-                    print(f"File {file_name} does not follow the numeric pattern and will be skipped.")
-
-            if len(valid_files) < 2:
-                print("Not enough valid files to detect a pattern.")
-                return
-
-            # Compare first and last valid filenames
-            file_1, file_2 = valid_files[0], valid_files[-1]
-            format_str_parts = []
-            i = 0
-
-            while i < len(file_1):
-                if i < len(file_2) and file_1[i] == file_2[i]:
-                    format_str_parts.append(file_1[i])
-                elif num_pattern.match(file_1[i:]):
-                    num_match_1 = num_pattern.match(file_1[i:])
-                    num_match_2 = num_pattern.match(file_2[i:])
-                    if num_match_1 and num_match_2:
-                        length_1 = len(num_match_1.group(0))
-                        length_2 = len(num_match_2.group(0))
-                        if length_1 == length_2:
-                            format_str_parts.append(f"{{:0{length_1}d}}")
-                            i += length_1 - 1  # Skip the numeric section
-                        else:
-                            format_str_parts.append(file_1[i])
-                else:
-                    format_str_parts.append(file_1[i])
-                i += 1
-
-            # Join format string and update the format input
-            format_str = ''.join(format_str_parts)
+            self.file_count = count_files_in_folder(folder_path)
+            format_str, numeric_values = detect_file_pattern(folder_path)
             self.format_input.setText(format_str)
-
             # Set start and end points based on detected numeric sequence
             if numeric_values:
                 self.start_input.setValue(min(numeric_values))
                 self.end_input.setValue(max(numeric_values))
-
-        except Exception as e:
-            print(f"Error detecting file pattern: {e}")
 
 class LoadData(BaseSetUp):
     def __init__(self, napari_viewer):
@@ -599,6 +531,15 @@ class LoadVectorfield(BaseSetUp):
         self.layout.addWidget(self.step_label)
         self.layout.addWidget(self.step_input)
 
+        # Steps
+        self.mask_label = QLabel("Mask:")
+        self.mask_input = QSpinBox(self)
+        self.mask_input.setMinimum(0)
+        self.mask_input.setMaximum(999999)
+        self.mask_input.setValue(5)
+        self.layout.addWidget(self.mask_label)
+        self.layout.addWidget(self.mask_input)
+
         # Maximum
         self.maxproj_checkbox = QCheckBox("Max projection")
         self.maxproj_checkbox.setChecked(False)
@@ -628,9 +569,8 @@ class LoadVectorfield(BaseSetUp):
             if not np.all(self.viewer.layers["Data Layer"].data[0,:,:,:] == 0):
                 v = np.zeros_like(self.viewer.layers["Data Layer"].data[:1,:,:,:])
                 self.viewer.layers["Data Layer"].data = np.concatenate([v,self.viewer.layers["Data Layer"].data], axis=0)
-            mask = self.viewer.layers["Data Layer"].data[1:,:,:,:] > 20
+            mask = self.viewer.layers["Data Layer"].data[1:,:,:,:] > self.mask_input.value()
             vectors, magnitudes = read_split_vectors(path_data, range(start_point, end_point + 1, step), mask, format_str)
-            print(vectors.shape)
                     
             # Add the image layer to the viewer
             vector_layer = self.viewer.add_tracks(
@@ -803,85 +743,19 @@ class SetUpTrackingDialog(QDialog):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
         if folder_path:
             self.path_input.setText(folder_path)
-            self.count_files_in_folder(folder_path)
-            self.detect_file_pattern(folder_path)
+            self.file_count = count_files_in_folder(folder_path)
+            format_str, numeric_values = detect_file_pattern(folder_path)
+            self.format_input.setText(format_str)
+            # Set start and end points based on detected numeric sequence
+            if numeric_values:
+                self.start_input.setValue(min(numeric_values))
+                self.end_input.setValue(max(numeric_values))
 
     def browse_json_folder(self):
         """Open a file dialog to select a folder to save JSON."""
         folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
         if folder_path:
             self.folder_input.setText(folder_path)
-
-    def count_files_in_folder(self, folder_path):
-        """Count the number of files in the selected folder and set the start and end points."""
-        try:
-            file_list = os.listdir(folder_path)
-            self.file_count = len(file_list)
-        except Exception as e:
-            print(f"Error counting files: {e}")
-
-    def detect_file_pattern(self, folder_path):
-        """Detect the file naming pattern, start and end points, and suggest it as the format."""
-        try:
-            file_list = os.listdir(folder_path)
-            file_list = [f for f in file_list if os.path.isfile(os.path.join(folder_path, f))]
-            file_list.sort()  # Ensure the files are sorted correctly
-
-            if len(file_list) < 2:
-                return  # We need at least two files to detect a pattern
-
-            # Prepare to capture numeric patterns and invalid files
-            num_pattern = re.compile(r'\d+')
-            valid_files = []
-            numeric_values = []
-            format_str = None
-
-            for file_name in file_list:
-                match = num_pattern.search(file_name)
-                if match:
-                    valid_files.append(file_name)
-                    numeric_values.append(int(match.group(0)))
-                else:
-                    print(f"File {file_name} does not follow the numeric pattern and will be skipped.")
-
-            if len(valid_files) < 2:
-                print("Not enough valid files to detect a pattern.")
-                return
-
-            # Compare first and last valid filenames
-            file_1, file_2 = valid_files[0], valid_files[-1]
-            format_str_parts = []
-            i = 0
-
-            while i < len(file_1):
-                if i < len(file_2) and file_1[i] == file_2[i]:
-                    format_str_parts.append(file_1[i])
-                elif num_pattern.match(file_1[i:]):
-                    num_match_1 = num_pattern.match(file_1[i:])
-                    num_match_2 = num_pattern.match(file_2[i:])
-                    if num_match_1 and num_match_2:
-                        length_1 = len(num_match_1.group(0))
-                        length_2 = len(num_match_2.group(0))
-                        if length_1 == length_2:
-                            format_str_parts.append(f"{{:0{length_1}d}}")
-                            i += length_1 - 1  # Skip the numeric section
-                        else:
-                            format_str_parts.append(file_1[i])
-                else:
-                    format_str_parts.append(file_1[i])
-                i += 1
-
-            # Join format string and update the format input
-            format_str = ''.join(format_str_parts)
-            self.format_input.setText(format_str)
-
-            # Set start and end points based on detected numeric sequence
-            if numeric_values:
-                self.start_input.setValue(min(numeric_values))
-                self.end_input.setValue(max(numeric_values))
-
-        except Exception as e:
-            print(f"Error detecting file pattern: {e}")
 
     def save_to_json(self):
         """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
@@ -1333,10 +1207,10 @@ class ManualTracking(QWidget):
 
         # Automatic prediction
         self.automatic_widget = None
-        self.automatic = QCheckBox("Automatic prediction")
-        self.automatic.setChecked(False)
-        self.layout.addWidget(self.automatic)
-        self.automatic.toggled.connect(self.switch_automatic)
+        self.automatic_check = QCheckBox("Automatic prediction")
+        self.automatic_check.setChecked(False)
+        self.layout.addWidget(self.automatic_check)
+        self.automatic_check.toggled.connect(self.switch_automatic)
 
         self.viewer.layers.selection.active = self.viewer.layers['Points Layer']
 
@@ -1356,12 +1230,7 @@ class ManualTracking(QWidget):
         self.setLayout(self.layout)
 
         # Reorder
-        self.viewer.layers["Data Layer"].opacity = 0.5
-        self.viewer.layers.move_multiple(
-            [
-                4,3,2,1,0,5,6
-            ]
-        )
+        self.reorder_layers()
 
         # Bindings
         self.viewer.bind_key('Shift+T', self.switch_tracking, overwrite=True)
@@ -1383,14 +1252,14 @@ class ManualTracking(QWidget):
         if self.points_layer_aux_back is not None:
             self.viewer.layers.remove(self.points_layer_aux_back)
 
-        if self.automatic_widget != None:
-            self.automatic_widget.hide()
-            self.automatic_widget = None
-
         # Unbinding
         self.viewer.bind_key('Shift+T', None)
         self.viewer.bind_key('Shift+S', None)
         self.viewer.bind_key('Shift+Z', None)
+
+        if self.automatic_check.isChecked():
+            self.automatic_dock.close()
+            self.automatic_widget = None
 
         super().hideEvent(event)
 
@@ -1401,12 +1270,14 @@ class ManualTracking(QWidget):
             self.new_tracking()
 
     def switch_automatic(self):
-        if self.automatic.isChecked():
-            self.automatic_widget = AutomaticPredictionAI(self.viewer, self)
-            self.viewer.window.add_dock_widget(self.automatic_widget)
+        if self.automatic_check.isChecked():
+            self.automatic_widget = AutomaticPredictionVectorfield(self.viewer, self)
+            self.automatic_dock = self.viewer.window.add_dock_widget(self.automatic_widget)
         else:
-            self.automatic_widget.hide()
+            self.automatic_dock.close()
             self.automatic_widget = None
+
+        self.reorder_layers()
 
     def process_image_layer_aux(self):
         """Process the image layer by adding an initial time of zeros and removing the last image, using a memory-efficient view."""
@@ -1507,7 +1378,6 @@ class ManualTracking(QWidget):
 
         return #maxima_coords[closest_max_idx]  # Return the coordinates of the closest maximum
 
-
     def accept_prediction(self):
     
         if self.tracking_active:
@@ -1518,6 +1388,23 @@ class ManualTracking(QWidget):
             # self.jump_next()
             # self.find_closest_maximum_in_boundary(self.point_prediction_layer.data[0])
             # self.unselect()
+
+    def add_predictions(self, time):
+
+        if self.tracking_forward:
+            positions = np.where(self.automatic_widget.prediction_layer.data[:,0] < time)[0]
+        else:
+            positions = np.where(self.automatic_widget.prediction_layer.data[:,0] > time)[0]
+
+        for i in positions:
+            point = self.automatic_widget.prediction_layer.data[i,:]
+            self.add(point)
+            self.add_point_properties(self.points_layer)
+            self.add_point_auxiliar(point)
+            self.add_track_point(point)
+            self.tracking_time = point[0]
+
+        self.automatic_widget.prediction_layer.data = np.zeros([0,4])
 
     def add_points(self, new_point):
         """Callback triggered when a new point is added to the points layer."""
@@ -1532,6 +1419,9 @@ class ManualTracking(QWidget):
 
         # Checking causality
         if self.tracking_active:
+
+            if self.automatic_check.isChecked():
+                self.add_predictions(new_point[0])
 
             if not self.check_causality():
                 return
@@ -1603,24 +1493,21 @@ class ManualTracking(QWidget):
 
                 new_point = closest_point
 
-        if self.automatic.isChecked():
+        if self.automatic_check.isChecked():
 
-            if self.automatic_widget.update_button.isChecked() and np.any(self.last_point != None):
-                self.automatic_widget.model.train_step2(
-                    self.image_layer.data, 
-                    self.last_point, new_point[1:], 
-                    self.tracking_forward, 
-                    lr=self.automatic_widget.augmentation_input.value(),
-                    num_translations=int(self.automatic_widget.augmentation_input.value()))
+            # if self.automatic_widget.update_button.isChecked() and np.any(self.last_point != None):
+            #     self.automatic_widget.model.train_step2(
+            #         self.image_layer.data, 
+            #         self.last_point, new_point[1:], 
+            #         self.tracking_forward, 
+            #         lr=self.automatic_widget.augmentation_input.value(),
+            #         num_translations=int(self.automatic_widget.augmentation_input.value()))
     
-            self.automatic_widget.model.predict(self.image_layer.data,new_point, self.tracking_forward, self.automatic_widget.prediction_layer)
-
+            self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(new_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
+            
         if self.tracking_active:
             self.jump_next()
             self.unselect()
-
-        self.last_point = new_point.copy()
-
 
     # def select_point(self, *args):
 
@@ -1672,29 +1559,29 @@ class ManualTracking(QWidget):
 
                         self.tracking_forward = True
 
-                        msg = QMessageBox()
-                        msg.setWindowTitle("Start from first point")
-                        msg.setText("This is the first point, we are starting a forward tracking.")
-                        msg.setIcon(QMessageBox.Question)
+                        # msg = QMessageBox()
+                        # msg.setWindowTitle("Start from first point")
+                        # msg.setText("This is the first point, we are starting a forward tracking.")
+                        # msg.setIcon(QMessageBox.Question)
 
-                        # Add more than two buttons
-                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+                        # # Add more than two buttons
+                        # button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
 
-                        msg.exec_()
+                        # msg.exec_()
 
                     elif selected_time == self.time_max:
 
                         self.tracking_forward = False
 
-                        msg = QMessageBox()
-                        msg.setWindowTitle("Start from last point")
-                        msg.setText("This is the last point, we are starting a backward tracking.")
-                        msg.setIcon(QMessageBox.Question)
+                        # msg = QMessageBox()
+                        # msg.setWindowTitle("Start from last point")
+                        # msg.setText("This is the last point, we are starting a backward tracking.")
+                        # msg.setIcon(QMessageBox.Question)
 
-                        # Add more than two buttons
-                        button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
+                        # # Add more than two buttons
+                        # button_okay = msg.addButton("Okay", QMessageBox.ActionRole)
 
-                        msg.exec_()
+                        # msg.exec_()
 
                     else:
 
@@ -1704,8 +1591,8 @@ class ManualTracking(QWidget):
                     self.add_track_point(selected_point)
                     self.update_tracking_time()
                     self.points_layer.properties["id"][selected_pos] = self.tracking_active_id
-                    self.last_point = selected_point.copy()
                     self.jump_next()
+                    self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
                     return
 
@@ -1734,8 +1621,8 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.tracking_forward = True
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
-                    self.last_point = selected_point.copy()
                     self.jump_next()
+                    self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
                 elif msg.clickedButton() == button_no:
 
@@ -1759,8 +1646,8 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.tracking_forward = False
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
-                    self.last_point = selected_point.copy()
                     self.jump_next()
+                    self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
                 elif msg.clickedButton() == button_no:
 
@@ -1784,8 +1671,8 @@ class ManualTracking(QWidget):
                     #Relabel future branch
                     self.question_tracking_direction()
                     self.setup_active_tracking(id=selected_id, tracking_time=selected_time)
-                    self.last_point = selected_point.copy()
                     self.jump_next()
+                    self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
                 elif msg.clickedButton() == button_no:
 
@@ -1813,6 +1700,7 @@ class ManualTracking(QWidget):
                     self.add_track_point(selected_point)
                     self.update_tracking_time()
                     self.jump_next()
+                    self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
                 elif msg.clickedButton() == button_no:
 
@@ -1838,6 +1726,7 @@ class ManualTracking(QWidget):
                 self.add_point_auxiliar(selected_point)
                 self.unselect()
                 self.jump_next()
+                self.automatic_widget.prediction_layer.data = self.automatic_widget.model.predict(selected_point, self.tracking_forward, n_steps=int(self.automatic_widget.predict_input.value()))
 
             elif self.tracking_forward and selected_time != self.track_first_time(selected_id):
 
@@ -2107,11 +1996,9 @@ class ManualTracking(QWidget):
 
     def add_point(self, points_layer, point):
 
-        self.prevent_update = True
         points_layer.data = np.vstack([points_layer.data, point])
         if "id" in points_layer.properties.keys():
             points_layer.properties["id"] = np.append(points_layer.properties["id"],[self.tracking_active_id])
-        self.prevent_update = False
 
         return
 
@@ -2224,13 +2111,11 @@ class ManualTracking(QWidget):
                 msg.exec_()
 
                 self.tracking_forward = True
-                self.last_point = None
                 self.setup_active_tracking()
 
             elif self.time_max > self.get_time():
 
                 self.question_tracking_direction()
-                self.last_point = None
                 self.setup_active_tracking()
 
             else:
@@ -2246,11 +2131,10 @@ class ManualTracking(QWidget):
                 msg.exec_()
 
                 self.tracking_forward = False
-                self.last_point = None
                 self.setup_active_tracking()
 
             return
-    
+            
     def relabel_track(self, selected_point, selected_id, new_id=None):
 
         selected_time = selected_point[0]
@@ -2394,6 +2278,9 @@ class ManualTracking(QWidget):
         self.viewer.layers["Auxiliar Forward Image Layer"].visible = False
 
         self.point1 = None
+
+        if self.automatic_check.isChecked():
+            self.automatic_widget.prediction_layer.data = np.zeros([0,4])
 
         return
 
@@ -2567,6 +2454,262 @@ class ManualTracking(QWidget):
         # Create empty trackings.npy (for storing tracking layers later)
         np.save(f"{self.tracking_layer.metadata['path']}/trackings.npy", self.tracking_layer.data)
 
+    def reorder_layers(self):
+
+        viewer = self.viewer
+        # Define the desired layer order
+        desired_order = [
+            'Auxiliar Backward Image Layer',
+            'Auxiliar Forward Image Layer',
+            'Data Layer',
+            'Tracking Layer',
+            'Points Layer',
+            'Auxiliar Forward Tracking Points',
+            'Auxiliar Backward Tracking Points',
+            'Prediction'
+        ]
+
+        # Get the current layers in the viewer
+        current_layers = viewer.layers
+
+        # Create a new ordered list with only the present layers
+        ordered_layers = [layer for layer in desired_order if layer in current_layers]
+
+        # Move the layers in the correct order
+        for layer_name in reversed(ordered_layers):  # Reverse to avoid reordering issues
+            viewer.layers.move(viewer.layers.index(layer_name), 0)
+
+class SetUpAutomaticPredictionVectorfield(QDialog):
+    def __init__(self, napari_viewer, model):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+        self.model = model
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.path_label = QLabel("Path to Vectorfield Folder:")
+        self.path_input = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.browse_folder)
+        self.layout.addWidget(self.path_label)
+        self.layout.addWidget(self.path_input)
+        self.layout.addWidget(self.browse_button)
+
+        # Start and end points
+        self.start_label = QLabel("Start Point:")
+        self.start_input = QSpinBox(self)
+        self.start_input.setMinimum(0)
+        self.start_input.setMaximum(999999)
+        self.end_label = QLabel("End Point:")
+        self.end_input = QSpinBox(self)
+        self.end_input.setMinimum(0)
+        self.end_input.setMaximum(999999)
+        self.layout.addWidget(self.start_label)
+        self.layout.addWidget(self.start_input)
+        self.layout.addWidget(self.end_label)
+        self.layout.addWidget(self.end_input)
+
+        # Format input
+        self.format_label = QLabel("Format:")
+        self.format_input = QLineEdit(self)
+        self.layout.addWidget(self.format_label)
+        self.layout.addWidget(self.format_input)
+
+        # Path output
+        self.folder_save_label = QLabel("Path to save model (folder):")
+        self.folder_save = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.folder_save_browse)
+        self.layout.addWidget(self.folder_save_label)
+        self.layout.addWidget(self.folder_save)
+        self.layout.addWidget(self.browse_button)
+
+        # Parameters
+        self.mask_label = QLabel("Mask Threshold:")
+        self.mask_input = QDoubleSpinBox(self)
+        self.mask_input.setDecimals(3)
+        self.mask_input.setValue(5)
+        self.mask_input.setMaximum(100000)
+        self.mask_input.setSingleStep(1)
+        self.layout.addWidget(self.mask_label)
+        self.layout.addWidget(self.mask_input)
+
+        # Save button
+        self.save_button = QPushButton("Create prediction model")
+        self.save_button.clicked.connect(self.save)
+        self.layout.addWidget(self.save_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def browse_folder(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.path_input.setText(folder_path)
+            self.file_count = count_files_in_folder(folder_path)
+            format_str, numeric_values = detect_file_pattern(folder_path)
+            self.format_input.setText(format_str)
+            # Set start and end points based on detected numeric sequence
+            if numeric_values:
+                self.start_input.setValue(min(numeric_values))
+                self.end_input.setValue(max(numeric_values))
+
+    def folder_save_browse(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.folder_save.setText(folder_path)
+
+    def folder_train_browse(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.folder_train.setText(folder_path)
+
+    def save(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+                
+        voxel = np.append([1000],self.model.tracking.scale[1:])
+
+        with open("{}/settings.json".format(self.folder_save.text()), 'w') as settings_file:
+            json.dump(
+                {
+                    "voxel":[float(i) for i in voxel]
+                }, settings_file, indent=4)
+
+        mask = self.viewer.layers["Data Layer"].data > self.mask_input.value()
+        x,y = read_split_vectors_tuple(
+                self.path_input.text(),
+                range(int(self.start_input.value()),int(self.end_input.value())),
+                mask,
+                self.format_input.text()
+            )
+        self.model.model = PredictorVectorfield((x,y))
+
+        self.model.model.save(self.folder_save.text())
+
+        self.accept()
+
+class LoadAutomaticPredictionVectorfield(QDialog):
+    def __init__(self, napari_viewer, model):
+        super().__init__()
+
+        # Add viewer
+        self.viewer = napari_viewer
+        self.model = model
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        # Path input
+        self.folder_load_label = QLabel("Path to Model Folder:")
+        self.folder_load = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.folder_load_browse)
+        self.layout.addWidget(self.folder_load_label)
+        self.layout.addWidget(self.folder_load)
+        self.layout.addWidget(self.browse_button)
+
+        # Load button
+        self.load_button = QPushButton("Create prediction model")
+        self.load_button.clicked.connect(self.load)
+        self.layout.addWidget(self.load_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+        # Internal variable to store the number of files
+        self.file_count = 0
+
+    def folder_load_browse(self):
+        """Open a file dialog to browse for a folder and count the number of files."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Data Folder")
+        if folder_path:
+            self.folder_load.setText(folder_path)
+
+    def load(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+        
+        self.model.model = PredictorVectorfield(path=self.folder_load.text())        
+
+        self.accept()
+
+class AutomaticPredictionVectorfield(QWidget):
+
+    def __init__(self, viewer, tracking):
+        super().__init__()
+
+        self.viewer = viewer
+        self.tracking = tracking
+        self.model = None
+        self.folder_save = None
+
+        msg = QMessageBox()
+        msg.setWindowTitle("Use Prediction Model")
+        msg.setText("Choose if to create or load a model.")
+        msg.setIcon(QMessageBox.Question)
+
+        # Add more than two buttons
+        button_create = msg.addButton("Create one", QMessageBox.ActionRole)
+        button_load = msg.addButton("Load one", QMessageBox.ActionRole)
+
+        msg.exec_()
+
+        if msg.clickedButton() == button_create:    
+            create_tracking_dialog = SetUpAutomaticPredictionVectorfield(viewer, self)
+            create_tracking_dialog.exec_()
+        elif msg.clickedButton() == button_load:
+            create_tracking_dialog = LoadAutomaticPredictionVectorfield(viewer, self)
+            create_tracking_dialog.exec_()
+
+        # Create the layout
+        self.layout = QVBoxLayout()
+
+        self.viewer.add_points(np.zeros([0,4]), size=8, face_color='blue', symbol='square', name="Prediction", scale=self.viewer.layers['Data Layer'].scale, blending="translucent_no_depth", visible=True)
+        self.prediction_layer =  self.viewer.layers['Prediction']
+
+        self.predict_label = QLabel("Predict:")
+        self.predict_input = QDoubleSpinBox(self)
+        self.predict_input.setDecimals(0)
+        self.predict_input.setMinimum(-1)
+        self.predict_input.setMaximum(99999)
+        self.predict_input.setValue(-1)
+        self.predict_input.setSingleStep(1)
+        self.layout.addWidget(self.predict_label)
+        self.layout.addWidget(self.predict_input)
+
+        # Save button
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.save)
+        self.layout.addWidget(self.save_button)
+
+        self.setLayout(self.layout)
+
+    def hideEvent(self, event):
+
+        if self.tracking.automatic_widget != None:
+            self.tracking.automatic_widget = None
+
+        if self.prediction_layer is not None:
+            self.viewer.layers.remove(self.prediction_layer)
+
+        self.tracking.automatic_check.setChecked(False)
+
+        super().hideEvent(event)
+
+    def save(self):
+        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
+                
+        self.model.save(self.folder_save)
+
 class SetUpAutomaticPredictionAI(QDialog):
     def __init__(self, napari_viewer, model):
         super().__init__()
@@ -2737,7 +2880,6 @@ class LoadAutomaticPredictionAI(QDialog):
             settings = json.load(f)
 
         shape = settings["shape"]
-        print(shape)
         self.model.model = Dual3DImageNet(shape)
         self.model.folder_save = self.folder_load.text()
         self.model.model.load(self.folder_load.text())

@@ -1,6 +1,8 @@
 from skimage.exposure import rescale_intensity
 from tifffile import TiffFile
 import numpy as np
+import os
+import re
 
 def correct_path(path):
     if path[-1] != "/":
@@ -186,3 +188,101 @@ def read_split_vectors(
         Magnitudes.append(Magnitude)
         
     return np.array(np.vstack(Vectors)), np.concatenate(Magnitudes)
+
+def read_split_vectors_tuple(
+    path_data, times, mask=None, name_format="{}{}"
+):
+    
+    path_to_file = correct_path(path_data) + name_format.format(times[0], times[1])
+    vecs = np.load(path_to_file)
+    Vectors = []
+    Vectors2 = []
+
+    idmax = 0
+    for tid, t in enumerate(times[:-1]):
+        path_to_file = correct_path(path_data) + name_format.format(times[tid], times[tid+1])
+        vecs = np.load(path_to_file)
+        if mask is not None:        
+            keep = mask[tid, vecs[:, 0, 0].astype(int), vecs[:, 0, 1].astype(int), vecs[:, 0, 2].astype(int)]
+            vecs = vecs[keep,:,:]
+        nvecs = vecs.shape[0]
+
+        Vecs = np.zeros((nvecs, 5))
+        Vecs2 = np.zeros((nvecs, 5))
+
+        #Ids
+        Vecs[:nvecs,0] = range(idmax, idmax+nvecs)
+        Vecs2[:nvecs,0] = range(idmax, idmax+nvecs)
+        #Time
+        Vecs[:nvecs,1] = tid
+        Vecs2[:nvecs,1] = tid+1
+        #Pos
+        Vecs[:nvecs,2:] = vecs[:,0,:]
+        Vecs2[:nvecs,2:] = vecs[:,0,:]+vecs[:,1,:]
+
+        
+        idmax += nvecs
+        Vectors.append(Vecs)
+        Vectors2.append(Vecs2)
+        
+    # return np.array(np.vstack(Vectors)), np.array(np.vstack(Vectors2))
+    return np.array(np.vstack(Vectors))[:,1:], np.array(np.vstack(Vectors2))[:,1:]
+
+def count_files_in_folder(folder_path):
+    """Count the number of files in the selected folder and set the start and end points."""
+    try:
+        file_list = os.listdir(folder_path)
+        return len(file_list)
+    except Exception as e:
+        print(f"Error counting files: {e}")
+
+def detect_file_pattern(folder_path):
+    """Detect the file naming pattern, start and end points, and suggest it as the format."""
+    try:
+        file_list = os.listdir(folder_path)
+        file_list = [f for f in file_list if os.path.isfile(os.path.join(folder_path, f))]
+        file_list.sort()  # Ensure the files are sorted correctly
+        if len(file_list) < 2:
+            return  # We need at least two files to detect a pattern
+        # Prepare to capture numeric patterns and invalid files
+        num_pattern = re.compile(r'\d+')
+        valid_files = []
+        numeric_values = []
+        format_str = None
+        for file_name in file_list:
+            match = num_pattern.search(file_name)
+            if match:
+                valid_files.append(file_name)
+                numeric_values.append(int(match.group(0)))
+            else:
+                print(f"File {file_name} does not follow the numeric pattern and will be skipped.")
+        if len(valid_files) < 2:
+            print("Not enough valid files to detect a pattern.")
+            return
+        # Compare first and last valid filenames
+        file_1, file_2 = valid_files[0], valid_files[-1]
+        format_str_parts = []
+        i = 0
+        while i < len(file_1):
+            if i < len(file_2) and file_1[i] == file_2[i]:
+                format_str_parts.append(file_1[i])
+            elif num_pattern.match(file_1[i:]):
+                num_match_1 = num_pattern.match(file_1[i:])
+                num_match_2 = num_pattern.match(file_2[i:])
+                if num_match_1 and num_match_2:
+                    length_1 = len(num_match_1.group(0))
+                    length_2 = len(num_match_2.group(0))
+                    if length_1 == length_2:
+                        format_str_parts.append(f"{{:0{length_1}d}}")
+                        i += length_1 - 1  # Skip the numeric section
+                    else:
+                        format_str_parts.append(file_1[i])
+            else:
+                format_str_parts.append(file_1[i])
+            i += 1
+        # Join format string and update the format input
+        format_str = ''.join(format_str_parts)
+
+        return format_str, numeric_values
+    except Exception as e:
+        print(f"Error detecting file pattern: {e}")
