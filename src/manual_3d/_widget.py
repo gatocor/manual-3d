@@ -592,6 +592,74 @@ class LoadVectorfield(BaseSetUp):
 
         return
 
+class LoadTracks(QWidget):
+    def __init__(self, napari_viewer):
+        super().__init__()
+
+        self.layout = QVBoxLayout()
+        self.viewer = napari_viewer
+
+        # Path input
+        self.path_label = QLabel("Path to Data Folder:")
+        self.path_input = QLineEdit(self)
+        self.browse_button = QPushButton("Browse Folder")
+        self.browse_button.clicked.connect(self.browse_folder)
+        self.layout.addWidget(self.path_label)
+        self.layout.addWidget(self.path_input)
+        self.layout.addWidget(self.browse_button)
+
+        # Steps
+        self.step_label = QLabel("Steps:")
+        self.step_input = QSpinBox(self)
+        self.step_input.setMinimum(-1)
+        self.step_input.setMaximum(999999)
+        self.step_input.setValue(1)
+        self.layout.addWidget(self.step_label)
+        self.layout.addWidget(self.step_input)
+
+        # Save button
+        self.exec_button = QPushButton("Load Sample")
+        self.exec_button.clicked.connect(self.exec_function)
+        self.layout.addWidget(self.exec_button)
+
+        # Set the layout
+        self.setLayout(self.layout)
+
+    def browse_folder(self):
+        """Open a file dialog to select a folder to save JSON."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Project")
+        if folder_path:
+            self.path_input.setText(folder_path)
+
+    def exec_function(self):
+
+        with open("{}/settings.json".format(self.path_input.text())) as settings_file:
+            settings = json.load(settings_file)
+
+        voxel_x = settings['voxel_x']
+        voxel_y = settings['voxel_y']
+        voxel_z = settings['voxel_z']
+        scale = [voxel_z, voxel_y, voxel_x]
+
+        tracks = np.load("{}/trackings.npy".format(self.path_input.text()))
+
+        features = {}
+        for feature in [i for i in os.listdir(self.path_input.text()) if i.startswith("trackings_")]:
+            features[feature.split(".")[0]] = np.load("{}/{}".format(self.path_input.text(), feature))
+
+        # Add the image layer to the viewer
+        tracks_layer = self.viewer.add_tracks(
+                tracks,
+                name="Tracks",
+                scale=np.append([1],scale),
+                tail_length=1,
+                opacity=.8,
+                blending='translucent',
+                features=features,
+                color_by="track_id"
+            )
+
+        return
     
 class SetUpTracking(BaseSetUp, BaseSavePath):
     def __init__(self, napari_viewer):
@@ -954,9 +1022,13 @@ class LoadTracking(QWidget):
         if len(trackings) == 0:
             trackings = np.zeros((1, 5))  # Default empty tracks array
 
+        properties = {}
+        for property in [i for i in os.listdir(folder_path) if i.startswith("trackings_")]:
+            properties[property.split(".")[0]] = np.load("{}/{}".format(folder_path, property))
+
         # Add tracks layer to Napari viewer (even if empty)
         # self.viewer.add_tracks(trackings, scale=np.append([1,1],scale), name="Tracking Layer")
-        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)})
+        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)}, properties=properties)
         print("Tracking layer (empty or not) loaded successfully.")
 
 class LoadTrackingDialog(QDialog):
@@ -1212,6 +1284,11 @@ class ManualTracking(QWidget):
         self.layout.addWidget(self.automatic_check)
         self.automatic_check.toggled.connect(self.switch_automatic)
 
+        # Automatic predict everything
+        self.predict_button = QPushButton("Automatic predict everything")
+        self.layout.addWidget(self.predict_button)
+        self.predict_button.clicked.connect(self.predict_everything)
+
         self.viewer.layers.selection.active = self.viewer.layers['Points Layer']
 
         # #Debug
@@ -1377,6 +1454,41 @@ class ManualTracking(QWidget):
         self.prediction_layer.data = np.array([self.get_time()*np.zeros_like(maxima_coords[:,0]), maxima_coords[:,0], maxima_coords[:,1], maxima_coords[:,2]]).reshape(len(maxima_coords[:,2]),4)
 
         return #maxima_coords[closest_max_idx]  # Return the coordinates of the closest maximum
+
+    def predict_everything(self):
+
+        if self.automatic_check.isChecked():
+
+            points = self.points_layer.data
+            predictor = self.automatic_widget.model
+
+            tracks = []
+            for i in range(points.shape[0]):
+
+                point = points[i,:]
+                points_backward = predictor.predict(point, forward=False)
+                points_forward = predictor.predict(point, forward=True)
+                predictions = np.vstack([points_backward,point.reshape(1,-1),points_forward])
+                track = np.zeros([predictions.shape[0],5])
+                track[:,1:] = predictions
+                track[:,0] = i
+                track = track[track[:,1].argsort()]
+                tracks.append(track.copy())
+
+            tracks = np.vstack(tracks)
+            self.tracking_layer.data = tracks
+
+            metrics = {
+                "displacement_total" : displacement_total,
+                "displacement_cumulative" : displacement_cumulative,
+                "path_total" : path_total,
+                "path_cumulative" : path_cumulative
+            }
+
+            features = self.tracking_layer.features.copy()
+            for metric,f in metrics.items(): 
+                features[metric] = f(tracks)
+            self.tracking_layer.features = features
 
     def accept_prediction(self):
     
@@ -2454,6 +2566,9 @@ class ManualTracking(QWidget):
         # Create empty trackings.npy (for storing tracking layers later)
         np.save(f"{self.tracking_layer.metadata['path']}/trackings.npy", self.tracking_layer.data)
 
+        for property,values in self.tracking_layer.features.items():
+            np.save(f"{self.tracking_layer.metadata['path']}/trackings_{property}.npy", values)
+
     def reorder_layers(self):
 
         viewer = self.viewer
@@ -2560,7 +2675,7 @@ class SetUpAutomaticPredictionVectorfield(QDialog):
             # Set start and end points based on detected numeric sequence
             if numeric_values:
                 self.start_input.setValue(min(numeric_values))
-                self.end_input.setValue(max(numeric_values))
+                self.end_input.setValue(max(numeric_values)+1)
 
     def folder_save_browse(self):
         """Open a file dialog to browse for a folder and count the number of files."""
@@ -2588,7 +2703,7 @@ class SetUpAutomaticPredictionVectorfield(QDialog):
         mask = self.viewer.layers["Data Layer"].data > self.mask_input.value()
         x,y = read_split_vectors_tuple(
                 self.path_input.text(),
-                range(int(self.start_input.value()),int(self.end_input.value())),
+                range(int(self.start_input.value()),int(self.end_input.value()+1)),
                 mask,
                 self.format_input.text()
             )
@@ -2610,7 +2725,7 @@ class LoadAutomaticPredictionVectorfield(QDialog):
         self.layout = QVBoxLayout()
 
         # Path input
-        self.folder_load_label = QLabel("Path to Model Folder:")
+        self.folder_load_label = QLabel("Path to prediction model folder:")
         self.folder_load = QLineEdit(self)
         self.browse_button = QPushButton("Browse Folder")
         self.browse_button.clicked.connect(self.folder_load_browse)
@@ -2619,7 +2734,7 @@ class LoadAutomaticPredictionVectorfield(QDialog):
         self.layout.addWidget(self.browse_button)
 
         # Load button
-        self.load_button = QPushButton("Create prediction model")
+        self.load_button = QPushButton("Load prediction model")
         self.load_button.clicked.connect(self.load)
         self.layout.addWidget(self.load_button)
 
@@ -2686,11 +2801,6 @@ class AutomaticPredictionVectorfield(QWidget):
         self.layout.addWidget(self.predict_label)
         self.layout.addWidget(self.predict_input)
 
-        # Save button
-        self.save_button = QPushButton("Save")
-        self.save_button.clicked.connect(self.save)
-        self.layout.addWidget(self.save_button)
-
         self.setLayout(self.layout)
 
     def hideEvent(self, event):
@@ -2704,11 +2814,6 @@ class AutomaticPredictionVectorfield(QWidget):
         self.tracking.automatic_check.setChecked(False)
 
         super().hideEvent(event)
-
-    def save(self):
-        """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
-                
-        self.model.save(self.folder_save)
 
 class SetUpAutomaticPredictionAI(QDialog):
     def __init__(self, napari_viewer, model):

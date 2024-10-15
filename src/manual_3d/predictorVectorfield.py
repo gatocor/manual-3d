@@ -70,10 +70,10 @@ class PredictorVectorfield():
 
         if forward:
             model = self.model_forward
-            n_iterations = min(self.t_max - t, n_steps)
+            n_iterations = max(min(self.t_max - t, n_steps),0)
         else:
             model = self.model_backward
-            n_iterations = min(t, n_steps)
+            n_iterations = max(min(t, n_steps),0)
 
         predictions = np.zeros([n_iterations,4])
 

@@ -106,7 +106,6 @@ def tif_reader_5D(path_to_file):
     imagej_metadata["ResolutionUnit"] = res_unit
     return hyperstack, imagej_metadata
 
-
 def read_split_times(
     path_data, times, name_format="{}", channels=None
 ):
@@ -286,3 +285,54 @@ def detect_file_pattern(folder_path):
         return format_str, numeric_values
     except Exception as e:
         print(f"Error detecting file pattern: {e}")
+
+def tracks_to_matrix(tracks, scale=np.array((2,0.347,0.347))):
+
+    x = len(np.unique(tracks[:,0]))
+    y = sum(tracks[:,0]==0)
+    z = 3
+
+    m = np.zeros([x,y,z])
+    ids = np.round(tracks[:,0]).astype(int)
+    times = np.round(tracks[:,1]).astype(int)
+    m[ids,times,0] = tracks[:,2]
+    m[ids,times,1] = tracks[:,3]
+    m[ids,times,2] = tracks[:,4]
+    m *= scale.reshape(1,1,-1)
+
+    return m, ids, times
+
+def displacement_total(tracks, scale=np.array((2,0.347,0.347))):
+
+    trackM, ids, times = tracks_to_matrix(tracks, scale=scale)
+    
+    v = np.sqrt(np.power((trackM[:,0,:]-trackM[:,-1,:]),2).sum(axis=1))
+    v = np.zeros(trackM.shape[:-1]) + v.reshape(-1,1)
+    
+    return v[ids, times]
+
+def path_total(tracks, scale=np.array((2,0.347,0.347))):
+
+    trackM, ids, times = tracks_to_matrix(tracks, scale = scale)
+
+    v = np.sqrt(np.power(np.diff(trackM,axis=1),2).sum(axis=2)).sum(axis=1)
+    v = np.zeros(trackM.shape[:-1]) + v.reshape(-1,1)
+    
+    return v[ids, times]
+
+def displacement_cumulative(tracks, scale=np.array((2,0.347,0.347))):
+
+    trackM, ids, times = tracks_to_matrix(tracks, scale = scale)
+
+    v = np.sqrt(np.power((trackM[:,0,:].reshape(trackM.shape[0],1,trackM.shape[2])-trackM),2).sum(axis=2))
+    
+    return v[ids, times]
+
+def path_cumulative(tracks, scale=np.array((2,0.347,0.347))):
+
+    trackM, ids, times = tracks_to_matrix(tracks, scale = scale)
+
+    v = np.sqrt(np.power(np.diff(trackM,axis=1),2).sum(axis=2)).cumsum(axis=1)
+    v = np.hstack([np.zeros([v.shape[0],1]),v])
+    
+    return v[ids, times]
