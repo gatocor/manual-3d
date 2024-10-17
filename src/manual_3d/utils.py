@@ -107,8 +107,16 @@ def tif_reader_5D(path_to_file):
     return hyperstack, imagej_metadata
 
 def read_split_times(
-    path_data, times, name_format="{}", channels=None
+    path_data, times=None, name_format=None, channels=None, downsample=(1,1,1)
 ):
+    
+    pattern, files_num = detect_file_pattern(path_data)
+    if times is None:
+        times = files_num
+
+    if name_format is None:
+        name_format = pattern
+
     IMGS = []
     extension = None
     if '.' in name_format:
@@ -119,7 +127,7 @@ def read_split_times(
         IMGS, metadata = tif_reader_5D(path_to_file)
         if channels is None:
             channels = [i for i in range(IMGS.shape[2])]
-        IMGS = IMGS[:, :, channels, :, :]
+        IMGS = IMGS[:, ::downsample[0], channels, ::downsample[1], ::downsample[2]]
         times_ids = np.array(times)
         # IMGS = IMGS[times_ids].astype("uint8")
         IMGS = rescale_intensity(IMGS[times_ids], out_range='uint8')
@@ -132,23 +140,29 @@ def read_split_times(
                 if channels is None:
                     channels = [i for i in range(IMG.shape[2])]
                 # IMGS.append(IMG[0].astype("uint8"))
-                IMG = IMG[:, :, channels, :, :]
+                IMG = IMG[:, ::downsample[0], channels, ::downsample[1], ::downsample[2]]
                 IMGS.append(rescale_intensity(IMG[0], out_range='uint8'))
                 del IMG
             elif extension == "npy":
-                IMG = np.load(path_to_file)
-                IMGS.append(IMG.astype("uint16"))
+                IMG = np.load(path_to_file)[::downsample[0], ::downsample[1], ::downsample[2]]
+                IMGS.append(IMG.astype("uint8"))
     
     if extension == "tif":
         return np.array(IMGS), metadata
     elif extension == "npy":
         return np.array(IMGS)
 
-
 def read_split_vectors(
-    path_data, times, mask=None, name_format="{}{}"
+    path_data, times=None, mask=None, name_format=None, downsample=(1,1,1)
 ):
     
+    pattern, files_num = detect_file_pattern(path_data)
+    if times is None:
+        times = files_num
+
+    if name_format is None:
+        name_format = pattern
+
     path_to_file = correct_path(path_data) + name_format.format(times[0], times[1])
     vecs = np.load(path_to_file)
     Vectors = []
@@ -159,7 +173,10 @@ def read_split_vectors(
         path_to_file = correct_path(path_data) + name_format.format(times[tid], times[tid+1])
         vecs = np.load(path_to_file)
         if mask is not None:        
-            keep = mask[tid, vecs[:, 0, 0].astype(int), vecs[:, 0, 1].astype(int), vecs[:, 0, 2].astype(int)]
+            keep = mask[tid, 
+                        (vecs[:, 0, 0]/downsample[0]).astype(int), 
+                        (vecs[:, 0, 1]/downsample[1]).astype(int), 
+                        (vecs[:, 0, 2]/downsample[2]).astype(int)]
             vecs = vecs[keep,:,:]
         nvecs = vecs.shape[0]
 
@@ -175,6 +192,7 @@ def read_split_vectors(
         #Pos
         Vecs[:nvecs,2:] = vecs[:,0,:]
         Vecs[nvecs:2*nvecs,2:] = vecs[:,0,:]+vecs[:,1,:]
+        Vecs[:,2:] /= np.array(downsample).reshape(1,3)
 
         #Magnitude
         # Magnitude[:nvecs] = np.log1p(np.sum(vecs[:,1,2:]**2,axis=1).flatten())
@@ -189,8 +207,15 @@ def read_split_vectors(
     return np.array(np.vstack(Vectors)), np.concatenate(Magnitudes)
 
 def read_split_vectors_tuple(
-    path_data, times, mask=None, name_format="{}{}"
+    path_data, times=None, mask=None, name_format=None, downsample=(1,1,1)
 ):
+    
+    pattern, files_num = detect_file_pattern(path_data)
+    if times is None:
+        times = files_num
+
+    if name_format is None:
+        name_format = pattern
     
     path_to_file = correct_path(path_data) + name_format.format(times[0], times[1])
     vecs = np.load(path_to_file)
@@ -202,7 +227,10 @@ def read_split_vectors_tuple(
         path_to_file = correct_path(path_data) + name_format.format(times[tid], times[tid+1])
         vecs = np.load(path_to_file)
         if mask is not None:        
-            keep = mask[tid, vecs[:, 0, 0].astype(int), vecs[:, 0, 1].astype(int), vecs[:, 0, 2].astype(int)]
+            keep = mask[tid, 
+                        (vecs[:, 0, 0]/downsample[0]).astype(int), 
+                        (vecs[:, 0, 1]/downsample[1]).astype(int), 
+                        (vecs[:, 0, 2]/downsample[2]).astype(int)]
             vecs = vecs[keep,:,:]
         nvecs = vecs.shape[0]
 
@@ -218,8 +246,9 @@ def read_split_vectors_tuple(
         #Pos
         Vecs[:nvecs,2:] = vecs[:,0,:]
         Vecs2[:nvecs,2:] = vecs[:,0,:]+vecs[:,1,:]
+        Vecs[:nvecs,2:] /= np.array(downsample).reshape(1,3)
+        Vecs2[:nvecs,2:] /= np.array(downsample).reshape(1,3)
 
-        
         idmax += nvecs
         Vectors.append(Vecs)
         Vectors2.append(Vecs2)

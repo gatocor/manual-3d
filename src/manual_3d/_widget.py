@@ -355,7 +355,7 @@ class MakeMovie(QWidget):
 
 class BaseSetUp(QWidget):
     def __init__(self, napari_viewer):
-        super().__init__()
+        super().__init__(napari_viewer)
 
         # Add viewer
         self.viewer = napari_viewer
@@ -415,6 +415,29 @@ class BaseSetUp(QWidget):
         self.layout.addWidget(self.voxel_z_label)
         self.layout.addWidget(self.voxel_z_input)
 
+        # Downsample sizes
+        self.downsample_x_label = QLabel("Downsample X:")
+        self.downsample_x_input = QDoubleSpinBox(self)
+        self.downsample_x_input.setDecimals(0)
+        self.downsample_x_input.setValue(1)
+        self.downsample_x_input.setSingleStep(1)
+        self.downsample_y_label = QLabel("Downsample Y:")
+        self.downsample_y_input = QDoubleSpinBox(self)
+        self.downsample_y_input.setDecimals(0)
+        self.downsample_y_input.setValue(1)
+        self.downsample_y_input.setSingleStep(1)
+        self.downsample_z_label = QLabel("Downsample Z:")
+        self.downsample_z_input = QDoubleSpinBox(self)
+        self.downsample_z_input.setDecimals(0)
+        self.downsample_z_input.setValue(1)
+        self.downsample_z_input.setSingleStep(1)
+        self.layout.addWidget(self.downsample_x_label)
+        self.layout.addWidget(self.downsample_x_input)
+        self.layout.addWidget(self.downsample_y_label)
+        self.layout.addWidget(self.downsample_y_input)
+        self.layout.addWidget(self.downsample_z_label)
+        self.layout.addWidget(self.downsample_z_input)
+
         # Set the layout
         self.setLayout(self.layout)
 
@@ -471,18 +494,21 @@ class LoadData(BaseSetUp):
 
     def exec_function(self):
 
+        scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+        downsample = (self.downsample_z_input.value(),self.downsample_y_input.value(),self.downsample_x_input.value())
+        scale_effective = np.array(scale)*np.array(downsample)
+
         if self.maxproj_checkbox.isChecked():
             path = self.path_input.text()
             l = range(self.start_input.value(), self.end_input.value(), self.step_input.value())
 
             file = self.format_input.text().format(l[0])
-            img = skimage.io.imread("{}/{}".format(path,file))
+            img = skimage.io.imread("{}/{}".format(path,file))[:,::downsample[0],::downsample[1],::downsample[2]]
             for i in l:
                 file = self.format_input.text().format(i)
                 img = np.maximum(skimage.io.imread("{}/{}".format(path,file)), img)
             
-            scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-            self.viewer.add_image(img,scale=scale,colormap="red",opacity=1)
+            self.viewer.add_image(img,scale=scale_effective,colormap="red",opacity=1)
         
         else:
 
@@ -494,13 +520,13 @@ class LoadData(BaseSetUp):
                 end_point = self.end_input.value()
                 step = self.step_input.value()
                 format_str = self.format_input.text()
-                scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
                     
                 # Load the movie/data layer
                 image = read_split_times(
                     str(path_data),
                     range(start_point, end_point + 1, step),
-                    format_str
+                    format_str,
+                    downsample = downsample
                 )[0][:, :, 0, :, :]
                     
                 if self.add_input.value() != 0:
@@ -508,7 +534,7 @@ class LoadData(BaseSetUp):
                     image = np.concatenate([v,image[1:,:,:,:]], axis=0)
                 
                 # Add the image layer to the viewer
-                self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(path_data)})
+                self.viewer.add_image(image, scale=scale_effective, name="Data Layer", metadata={"path":str(path_data)})
 
                 print("Data layer loaded successfully.")
                 
@@ -564,19 +590,27 @@ class LoadVectorfield(BaseSetUp):
             step = self.step_input.value()
             format_str = self.format_input.text()
             scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
+            downsample = (self.downsample_z_input.value(),self.downsample_y_input.value(),self.downsample_x_input.value())
+            scale_effective = np.array(scale)*np.array(downsample)
                     
             # Load the movie/data layer
             if not np.all(self.viewer.layers["Data Layer"].data[0,:,:,:] == 0):
                 v = np.zeros_like(self.viewer.layers["Data Layer"].data[:1,:,:,:])
                 self.viewer.layers["Data Layer"].data = np.concatenate([v,self.viewer.layers["Data Layer"].data], axis=0)
             mask = self.viewer.layers["Data Layer"].data[1:,:,:,:] > self.mask_input.value()
-            vectors, magnitudes = read_split_vectors(path_data, range(start_point, end_point + 1, step), mask, format_str)
+            vectors, magnitudes = read_split_vectors(
+                                    path_data, 
+                                    range(start_point, end_point + 1, step), 
+                                    mask, 
+                                    format_str, 
+                                    downsample=downsample
+                                )
                     
             # Add the image layer to the viewer
             vector_layer = self.viewer.add_tracks(
                     vectors,
                     name="vectors",
-                    scale=scale,
+                    scale=scale_effective,
                     tail_length=1,
                     opacity=.8,
                     blending='translucent',
@@ -641,6 +675,16 @@ class LoadTracks(QWidget):
         voxel_z = settings['voxel_z']
         scale = [voxel_z, voxel_y, voxel_x]
 
+        try:
+            downsample_x = settings['downsample_x']
+            downsample_y = settings['downsample_y']
+            downsample_z = settings['downsample_z']
+            downsample = [downsample_z, downsample_y, downsample_z]
+        except:
+            downsample = (1,1,1)
+
+        scale_effective = np.append([1], np.array(scale)*np.array(downsample))
+
         tracks = np.load("{}/trackings.npy".format(self.path_input.text()))
 
         features = {}
@@ -651,7 +695,7 @@ class LoadTracks(QWidget):
         tracks_layer = self.viewer.add_tracks(
                 tracks,
                 name="Tracks",
-                scale=np.append([1],scale),
+                scale=np.append([1],scale_effective),
                 tail_length=1,
                 opacity=.8,
                 blending='translucent',
@@ -676,6 +720,9 @@ class SetUpTracking(BaseSetUp, BaseSavePath):
             'voxel_x': self.voxel_x_input.value(),
             'voxel_y': self.voxel_y_input.value(),
             'voxel_z': self.voxel_z_input.value(),
+            'downsample_x': self.downsample_x_input.value(),
+            'downsample_y': self.downsample_y_input.value(),
+            'downsample_z': self.downsample_z_input.value(),
         }
         
         folder_path = self.folder_input.text()
@@ -786,6 +833,29 @@ class SetUpTrackingDialog(QDialog):
         self.layout.addWidget(self.voxel_z_label)
         self.layout.addWidget(self.voxel_z_input)
 
+        # Downsample sizes
+        self.downsample_x_label = QLabel("Downsample X:")
+        self.downsample_x_input = QDoubleSpinBox(self)
+        self.downsample_x_input.setDecimals(0)
+        self.downsample_x_input.setValue(1)
+        self.downsample_x_input.setSingleStep(1)
+        self.downsample_y_label = QLabel("Downsample Y:")
+        self.downsample_y_input = QDoubleSpinBox(self)
+        self.downsample_y_input.setDecimals(0)
+        self.downsample_y_input.setValue(1)
+        self.downsample_y_input.setSingleStep(1)
+        self.downsample_z_label = QLabel("Downsample Z:")
+        self.downsample_z_input = QDoubleSpinBox(self)
+        self.downsample_z_input.setDecimals(0)
+        self.downsample_z_input.setValue(1)
+        self.downsample_z_input.setSingleStep(1)
+        self.layout.addWidget(self.downsample_x_label)
+        self.layout.addWidget(self.downsample_x_input)
+        self.layout.addWidget(self.downsample_y_label)
+        self.layout.addWidget(self.downsample_y_input)
+        self.layout.addWidget(self.downsample_z_label)
+        self.layout.addWidget(self.downsample_z_input)
+
         # Folder input for storing the JSON file
         self.folder_label = QLabel("Path to where to save project:")
         self.folder_input = QLineEdit(self)
@@ -835,6 +905,9 @@ class SetUpTrackingDialog(QDialog):
             'voxel_x': self.voxel_x_input.value(),
             'voxel_y': self.voxel_y_input.value(),
             'voxel_z': self.voxel_z_input.value(),
+            'downsample_x': self.downsample_x_input.value(),
+            'downsample_y': self.downsample_y_input.value(),
+            'downsample_z': self.downsample_z_input.value(),
         }
         
         folder_path = self.folder_input.text()
@@ -958,17 +1031,27 @@ class LoadTracking(QWidget):
         voxel_z = settings.get('voxel_z', 1.0)
         scale = [voxel_z, voxel_y, voxel_x]
 
+        try:
+            downsample_x = int(settings.get('downsample_x', 1.0))
+            downsample_y = int(settings.get('downsample_y', 1.0))
+            downsample_z = int(settings.get('downsample_z', 1.0))
+            downsample = [downsample_z, downsample_y, downsample_z]
+        except:
+            downsample = (1,1,1)
+
+        # scale_effective = np.array(scale)*np.array(downsample)
+
         # Load the selected layers
         if self.data_checkbox.isChecked():
-            self.load_data_layer(folder_path, settings, scale)
+            self.load_data_layer(folder_path, settings, scale, downsample)
 
         if self.points_checkbox.isChecked():
-            self.load_points_layer(folder_path, scale)
+            self.load_points_layer(folder_path, scale, downsample)
 
         if self.tracking_checkbox.isChecked():
-            self.load_tracking_layer(folder_path, scale)
+            self.load_tracking_layer(folder_path, scale, downsample)
 
-    def load_data_layer(self, folder_path, settings, scale):
+    def load_data_layer(self, folder_path, settings, scale, downsample):
         """Load the data layer from the project folder."""
         try:
             # Assuming read_split_times is defined elsewhere
@@ -981,16 +1064,19 @@ class LoadTracking(QWidget):
             image = read_split_times(
                 str(path_data),
                 range(start_point, end_point + 1),
-                format_str
+                format_str,
+                downsample=downsample
             )[0][:, :, 0, :, :]
             
+            scale_effective = np.array(scale)*np.array(downsample)
+
             # Add the image layer to the viewer
-            self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(folder_path)})
+            self.viewer.add_image(image, scale=scale_effective, name="Data Layer", metadata={"path":str(folder_path)})
             print("Data layer loaded successfully.")
         except Exception as e:
             print(f"Error loading data layer: {e}")
 
-    def load_points_layer(self, folder_path, scale):
+    def load_points_layer(self, folder_path, scale, downsample):
         """Load the points layer from points.npy, even if it's empty."""
         points_file = os.path.join(folder_path, "points.npy")
         points = np.empty((0, 4))  # Default empty points array in 3D
@@ -1005,11 +1091,13 @@ class LoadTracking(QWidget):
             except Exception as e:
                 print(f"Error loading points layer: {e}")
 
+        scale_effective = np.array(scale)*np.array(downsample)
+
         # Add points layer to Napari viewer (even if empty)
-        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer", metadata={"path":str(folder_path)})
+        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale_effective), name="Points Layer", metadata={"path":str(folder_path)})
         print("Points layer (empty or not) loaded successfully.")
 
-    def load_tracking_layer(self, folder_path, scale):
+    def load_tracking_layer(self, folder_path, scale, downsample):
         """Load the tracking layer from trackings.npy, even if it's empty."""
         tracking_file = os.path.join(folder_path, "trackings.npy")
 
@@ -1022,13 +1110,15 @@ class LoadTracking(QWidget):
         if len(trackings) == 0:
             trackings = np.zeros((1, 5))  # Default empty tracks array
 
+        scale_effective = np.array(scale)*np.array(downsample)
+
         properties = {}
         for property in [i for i in os.listdir(folder_path) if i.startswith("trackings_")]:
             properties[property.split(".")[0]] = np.load("{}/{}".format(folder_path, property))
 
         # Add tracks layer to Napari viewer (even if empty)
         # self.viewer.add_tracks(trackings, scale=np.append([1,1],scale), name="Tracking Layer")
-        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)}, properties=properties)
+        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale_effective), metadata={"path":str(folder_path)}, properties=properties)
         print("Tracking layer (empty or not) loaded successfully.")
 
 class LoadTrackingDialog(QDialog):
@@ -1104,19 +1194,29 @@ class LoadTrackingDialog(QDialog):
         voxel_z = settings.get('voxel_z', 1.0)
         scale = [voxel_z, voxel_y, voxel_x]
 
+        try:
+            downsample_x = int(settings.get('downsample_x', 1.0))
+            downsample_y = int(settings.get('downsample_y', 1.0))
+            downsample_z = int(settings.get('downsample_z', 1.0))
+            downsample = [downsample_z, downsample_y, downsample_z]
+        except:
+            downsample = (1,1,1)
+
+        # scale_effective = np.array(scale)*np.array(downsample)
+
         # Load the selected layers
         if self.data_checkbox.isChecked():
-            self.load_data_layer(folder_path, settings, scale)
+            self.load_data_layer(folder_path, settings, scale, downsample)
 
         if self.points_checkbox.isChecked():
-            self.load_points_layer(folder_path, scale)
+            self.load_points_layer(folder_path, scale, downsample)
 
         if self.tracking_checkbox.isChecked():
-            self.load_tracking_layer(folder_path, scale)
+            self.load_tracking_layer(folder_path, scale, downsample)
 
         self.accept()
 
-    def load_data_layer(self, folder_path, settings, scale):
+    def load_data_layer(self, folder_path, settings, scale, downsample):
         """Load the data layer from the project folder."""
         try:
             # Assuming read_split_times is defined elsewhere
@@ -1129,16 +1229,25 @@ class LoadTrackingDialog(QDialog):
             image = read_split_times(
                 str(path_data),
                 range(start_point, end_point + 1),
-                format_str
+                format_str,
+                downsample=downsample
             )[0][:, :, 0, :, :]
             
+            scale_effective = np.array(scale)*np.array(downsample)
+
             # Add the image layer to the viewer
-            self.viewer.add_image(image, scale=scale, name="Data Layer", metadata={"path":str(folder_path)})
+            self.viewer.add_image(image, scale=scale_effective, name="Data Layer", 
+                                  metadata={
+                                      "path":str(folder_path),
+                                      "scale":scale,
+                                      "downsample":downsample
+                                    }
+                                )
             print("Data layer loaded successfully.")
         except Exception as e:
             print(f"Error loading data layer: {e}")
 
-    def load_points_layer(self, folder_path, scale):
+    def load_points_layer(self, folder_path, scale, downsample):
         """Load the points layer from points.npy, even if it's empty."""
         points_file = os.path.join(folder_path, "points.npy")
         points = np.empty((0, 4))  # Default empty points array in 3D
@@ -1153,11 +1262,19 @@ class LoadTrackingDialog(QDialog):
             except Exception as e:
                 print(f"Error loading points layer: {e}")
 
+        scale_effective = np.array(scale)*np.array(downsample)
+
         # Add points layer to Napari viewer (even if empty)
-        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale), name="Points Layer", metadata={"path":str(folder_path)})
+        self.viewer.add_points(points, properties={'id':points_id}, scale=np.append([1],scale_effective), name="Points Layer", 
+                                  metadata={
+                                      "path":str(folder_path),
+                                      "scale":scale,
+                                      "downsample":downsample
+                                    }
+                            )
         print("Points layer (empty or not) loaded successfully.")
 
-    def load_tracking_layer(self, folder_path, scale):
+    def load_tracking_layer(self, folder_path, scale, downsample):
         """Load the tracking layer from trackings.npy, even if it's empty."""
         tracking_file = os.path.join(folder_path, "trackings.npy")
 
@@ -1170,9 +1287,20 @@ class LoadTrackingDialog(QDialog):
         if len(trackings) == 0:
             trackings = np.zeros((1, 5))  # Default empty tracks array
 
+        scale_effective = np.array(scale)*np.array(downsample)
+
+        properties = {}
+        for property in [i for i in os.listdir(folder_path) if i.startswith("trackings_")]:
+            properties[property.split(".")[0]] = np.load("{}/{}".format(folder_path, property))
+
         # Add tracks layer to Napari viewer (even if empty)
         # self.viewer.add_tracks(trackings, scale=np.append([1,1],scale), name="Tracking Layer")
-        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale), metadata={"path":str(folder_path)})
+        self.viewer.add_tracks(trackings, name="Tracking Layer", scale=np.append([1],scale_effective),                                   metadata={
+                                      "path":str(folder_path),
+                                      "scale":scale,
+                                      "downsample":downsample
+                                    }
+                            )
         print("Tracking layer (empty or not) loaded successfully.")
 
 class ManualTracking(QWidget):
@@ -1182,10 +1310,9 @@ class ManualTracking(QWidget):
         # Add napari viewer
         self.viewer = napari_viewer
 
-        while 'Data Layer' not in napari_viewer.layers or \
+        if 'Data Layer' not in napari_viewer.layers or \
             'Points Layer' not in napari_viewer.layers or \
             'Tracking Layer' not in napari_viewer.layers:
-
             msg = QMessageBox()
             msg.setWindowTitle("Layers missing")
             msg.setText("Files from a tracking project seems to be missing.")
@@ -1200,9 +1327,22 @@ class ManualTracking(QWidget):
             if msg.clickedButton() == button_create:
                 load_tracking_dialog = SetUpTrackingDialog(napari_viewer)
                 load_tracking_dialog.exec_()
+                load_tracking_dialog = LoadTrackingDialog(napari_viewer)
+                load_tracking_dialog.exec_()
             elif msg.clickedButton() == button_load:
                 load_tracking_dialog = LoadTrackingDialog(napari_viewer)
                 load_tracking_dialog.exec_()
+
+        if 'Data Layer' not in napari_viewer.layers or \
+            'Points Layer' not in napari_viewer.layers or \
+            'Tracking Layer' not in napari_viewer.layers:
+
+            msg = QMessageBox()
+            msg.setWindowTitle("No all layers loaded")
+            msg.setText("Manual tracking will not work properly if some layer is missing.")
+            msg.setIcon(QMessageBox.Question)
+
+            msg.exec_()
 
         # Create the layout
         self.layout = QVBoxLayout()
@@ -1232,7 +1372,8 @@ class ManualTracking(QWidget):
         self.points_layer.remove_selected = self.remove
         self.tracking_layer = self.viewer.layers['Tracking Layer']
         self.time_max = len(self.image_layer.data)-1
-        self.scale = self.image_layer.scale[1:]
+        self.scale = self.image_layer.metadata["scale"]
+        self.downsample = self.image_layer.metadata["downsample"]
 
         # Auxiliar connect
         self.image_layer_aux_forw = None
@@ -2693,6 +2834,7 @@ class SetUpAutomaticPredictionVectorfield(QDialog):
         """Save the current input to a JSON file in the selected folder and create NumPy files for points and tracking layers."""
                 
         voxel = np.append([1000],self.model.tracking.scale[1:])
+        downsample = self.model.tracking.downsample
 
         with open("{}/settings.json".format(self.folder_save.text()), 'w') as settings_file:
             json.dump(
@@ -2705,7 +2847,8 @@ class SetUpAutomaticPredictionVectorfield(QDialog):
                 self.path_input.text(),
                 range(int(self.start_input.value()),int(self.end_input.value()+1)),
                 mask,
-                self.format_input.text()
+                self.format_input.text(),
+                downsample=downsample
             )
         self.model.model = PredictorVectorfield((x,y))
 
