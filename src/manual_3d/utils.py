@@ -150,7 +150,7 @@ def read_split_times(
     if extension == "tif":
         return np.array(IMGS), metadata
     elif extension == "npy":
-        return np.array(IMGS)
+        return np.array(IMGS), None
 
 def read_split_vectors(
     path_data, times=None, mask=None, name_format=None, downsample=(1,1,1)

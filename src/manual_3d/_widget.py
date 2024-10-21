@@ -495,7 +495,7 @@ class LoadData(BaseSetUp):
     def exec_function(self):
 
         scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-        downsample = (self.downsample_z_input.value(),self.downsample_y_input.value(),self.downsample_x_input.value())
+        downsample = (int(self.downsample_z_input.value()),int(self.downsample_y_input.value()),int(self.downsample_x_input.value()))
         scale_effective = np.array(scale)*np.array(downsample)
 
         if self.maxproj_checkbox.isChecked():
@@ -512,36 +512,30 @@ class LoadData(BaseSetUp):
         
         else:
 
-            try:
-
-                # Assuming read_split_times is defined elsewhere
-                path_data = self.path_input.text()
-                start_point = self.start_input.value()
-                end_point = self.end_input.value()
-                step = self.step_input.value()
-                format_str = self.format_input.text()
+            # Assuming read_split_times is defined elsewhere
+            path_data = self.path_input.text()
+            start_point = self.start_input.value()
+            end_point = self.end_input.value()
+            step = self.step_input.value()
+            format_str = self.format_input.text()
                     
-                # Load the movie/data layer
-                image = read_split_times(
-                    str(path_data),
-                    range(start_point, end_point + 1, step),
-                    format_str,
-                    downsample = downsample
-                )[0][:, :, 0, :, :]
+            # Load the movie/data layer
+            image = read_split_times(
+                str(path_data),
+                range(start_point, end_point + 1, step),
+                format_str,
+                downsample = downsample
+            )[0][:, :, 0, :, :]
                     
-                if self.add_input.value() != 0:
-                    v = np.zeros_like(image[:self.add_input.value(),:,:,:])
-                    image = np.concatenate([v,image[1:,:,:,:]], axis=0)
+            if self.add_input.value() != 0:
+                v = np.zeros_like(image[:self.add_input.value(),:,:,:])
+                image = np.concatenate([v,image[1:,:,:,:]], axis=0)
                 
-                # Add the image layer to the viewer
-                self.viewer.add_image(image, scale=scale_effective, name="Data Layer", metadata={"path":str(path_data)})
+            # Add the image layer to the viewer
+            self.viewer.add_image(image, scale=scale_effective, name="Data Layer", metadata={"path":str(path_data)})
 
-                print("Data layer loaded successfully.")
+            print("Data layer loaded successfully.")
                 
-            except Exception as e:
-                
-                print(f"Error loading data layer: {e}")
-
         return
 
 class LoadVectorfield(BaseSetUp):
@@ -590,7 +584,7 @@ class LoadVectorfield(BaseSetUp):
             step = self.step_input.value()
             format_str = self.format_input.text()
             scale = (self.voxel_z_input.value(),self.voxel_y_input.value(),self.voxel_x_input.value())
-            downsample = (self.downsample_z_input.value(),self.downsample_y_input.value(),self.downsample_x_input.value())
+            downsample = (int(self.downsample_z_input.value()),int(self.downsample_y_input.value()),int(self.downsample_x_input.value()))
             scale_effective = np.array(scale)*np.array(downsample)
                     
             # Load the movie/data layer
