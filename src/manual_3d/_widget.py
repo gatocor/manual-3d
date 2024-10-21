@@ -355,7 +355,7 @@ class MakeMovie(QWidget):
 
 class BaseSetUp(QWidget):
     def __init__(self, napari_viewer):
-        super().__init__(napari_viewer)
+        super().__init__()
 
         # Add viewer
         self.viewer = napari_viewer
