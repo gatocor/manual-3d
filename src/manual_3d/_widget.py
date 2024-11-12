@@ -673,11 +673,11 @@ class LoadTracks(QWidget):
             downsample_x = settings['downsample_x']
             downsample_y = settings['downsample_y']
             downsample_z = settings['downsample_z']
-            downsample = [downsample_z, downsample_y, downsample_z]
+            downsample = [downsample_z, downsample_y, downsample_x]
         except:
             downsample = (1,1,1)
 
-        scale_effective = np.append([1], np.array(scale)*np.array(downsample))
+        scale_effective = np.append([1,1], np.array(scale)*np.array(downsample))
 
         tracks = np.load("{}/trackings.npy".format(self.path_input.text()))
 
@@ -689,7 +689,7 @@ class LoadTracks(QWidget):
         tracks_layer = self.viewer.add_tracks(
                 tracks,
                 name="Tracks",
-                scale=np.append([1],scale_effective),
+                scale=scale_effective,
                 tail_length=1,
                 opacity=.8,
                 blending='translucent',
