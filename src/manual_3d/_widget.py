@@ -677,7 +677,7 @@ class LoadTracks(QWidget):
         except:
             downsample = (1,1,1)
 
-        scale_effective = np.append([1,1], np.array(scale)*np.array(downsample))
+        scale_effective = np.append([1], np.array(scale)*np.array(downsample))
 
         tracks = np.load("{}/trackings.npy".format(self.path_input.text()))
 
